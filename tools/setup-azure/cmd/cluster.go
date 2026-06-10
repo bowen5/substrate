@@ -52,7 +52,7 @@ func createClusterIdempotent(ctx context.Context, env *Environment) error {
 		return fmt.Errorf("create Azure managed clusters client: %w", err)
 	}
 
-	if err := createResourceGroup(ctx, resourceGroupsClient, clusterEnv); err != nil {
+	if err := createResourceGroup(ctx, resourceGroupsClient, clusterEnv.ResourceGroup, clusterEnv.Location); err != nil {
 		return err
 	}
 
@@ -68,13 +68,13 @@ func createClusterIdempotent(ctx context.Context, env *Environment) error {
 	return validateExistingCluster(clusterResp.ManagedCluster, clusterEnv)
 }
 
-func createResourceGroup(ctx context.Context, client *armresources.ResourceGroupsClient, env *ClusterEnvironment) error {
-	slog.Info("Creating/updating Azure resource group", slog.String("resourceGroup", env.ResourceGroup), slog.String("location", env.Location))
-	_, err := client.CreateOrUpdate(ctx, env.ResourceGroup, armresources.ResourceGroup{
-		Location: to.Ptr(env.Location),
+func createResourceGroup(ctx context.Context, client *armresources.ResourceGroupsClient, resourceGroup, location string) error {
+	slog.Info("Creating/updating Azure resource group", slog.String("resourceGroup", resourceGroup), slog.String("location", location))
+	_, err := client.CreateOrUpdate(ctx, resourceGroup, armresources.ResourceGroup{
+		Location: to.Ptr(location),
 	}, nil)
 	if err != nil {
-		return fmt.Errorf("create/update resource group %s: %w", env.ResourceGroup, err)
+		return fmt.Errorf("create/update resource group %s: %w", resourceGroup, err)
 	}
 	return nil
 }

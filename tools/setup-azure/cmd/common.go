@@ -17,6 +17,7 @@ package cmd
 import (
 	"fmt"
 	"os"
+	"regexp"
 	"strconv"
 	"strings"
 )
@@ -36,6 +37,19 @@ type ClusterEnvironment struct {
 	DNSPrefix         string
 	VnetSubnetID      string
 }
+
+type SnapshotStorageEnvironment struct {
+	ResourceGroup string
+	Location      string
+	AccountName   string
+	ContainerName string
+	SKUName       string
+}
+
+var (
+	storageAccountNamePattern = regexp.MustCompile(`^[a-z0-9]{3,24}$`)
+	blobContainerNamePattern  = regexp.MustCompile(`^[a-z0-9](?:[a-z0-9-]{1,61}[a-z0-9])?$`)
+)
 
 func loadEnv() (*Environment, error) {
 	requiredEnvVars := []string{
@@ -92,6 +106,42 @@ func requireClusterEnv() (*ClusterEnvironment, error) {
 		NodeVMSize:        envOrDefault("AKS_NODE_VM_SIZE", "Standard_D4ads_v5"),
 		DNSPrefix:         dnsPrefix,
 		VnetSubnetID:      os.Getenv("AKS_VNET_SUBNET_ID"),
+	}, nil
+}
+
+func requireSnapshotStorageEnv() (*SnapshotStorageEnvironment, error) {
+	requiredEnvVars := []string{
+		"AZURE_RESOURCE_GROUP",
+		"AZURE_LOCATION",
+		"AZURE_STORAGE_ACCOUNT_NAME",
+	}
+
+	missing := []string{}
+	for _, key := range requiredEnvVars {
+		if os.Getenv(key) == "" {
+			missing = append(missing, key)
+		}
+	}
+	if len(missing) > 0 {
+		return nil, fmt.Errorf("missing required environment variables for snapshot storage setup: %s", strings.Join(missing, ", "))
+	}
+
+	accountName := os.Getenv("AZURE_STORAGE_ACCOUNT_NAME")
+	if !storageAccountNamePattern.MatchString(accountName) {
+		return nil, fmt.Errorf("AZURE_STORAGE_ACCOUNT_NAME must be 3-24 characters using only lowercase letters and numbers")
+	}
+
+	containerName := envOrDefault("AZURE_STORAGE_CONTAINER_NAME", "ate-snapshots")
+	if !blobContainerNamePattern.MatchString(containerName) || strings.Contains(containerName, "--") {
+		return nil, fmt.Errorf("AZURE_STORAGE_CONTAINER_NAME must be 3-63 characters using lowercase letters, numbers, and single dashes; dashes must be between letters or numbers")
+	}
+
+	return &SnapshotStorageEnvironment{
+		ResourceGroup: os.Getenv("AZURE_RESOURCE_GROUP"),
+		Location:      os.Getenv("AZURE_LOCATION"),
+		AccountName:   accountName,
+		ContainerName: containerName,
+		SKUName:       envOrDefault("AZURE_STORAGE_ACCOUNT_SKU", "Standard_LRS"),
 	}, nil
 }
 
