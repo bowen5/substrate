@@ -27,6 +27,7 @@ var (
 	createClusterFlag             bool
 	createSnapshotStorageFlag     bool
 	createStorageRolesFlag        bool
+	grantAksNodePermissionsFlag   bool
 	allFlag                       bool
 )
 
@@ -49,6 +50,7 @@ var rootCmd = &cobra.Command{
 			{"create cluster", &createClusterFlag, createClusterIdempotent},
 			{"create snapshot storage", &createSnapshotStorageFlag, createSnapshotStorage},
 			{"create storage role assignments", &createStorageRolesFlag, createStorageRoleAssignments},
+			{"grant aks node permissions", &grantAksNodePermissionsFlag, grantAksNodePermissions},
 		}
 
 		if cmd.Flags().NFlag() == 0 {
@@ -89,5 +91,6 @@ func init() {
 	rootCmd.Flags().BoolVar(&createClusterFlag, "create-cluster", false, "Create AKS cluster")
 	rootCmd.Flags().BoolVar(&createSnapshotStorageFlag, "create-snapshot-storage", false, "Create snapshot storage account and blob container")
 	rootCmd.Flags().BoolVar(&createStorageRolesFlag, "create-storage-role-assignments", false, "Create atelet managed identity, federated credential, and snapshot storage role assignment")
+	rootCmd.Flags().BoolVar(&grantAksNodePermissionsFlag, "grant-aks-node-permissions", false, "Grant AKS kubelet identity permission to pull images from ACR")
 	rootCmd.Flags().BoolVar(&allFlag, "all", false, "Run all setup steps")
 }

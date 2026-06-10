@@ -59,6 +59,13 @@ type StorageRoleAssignmentsEnvironment struct {
 	FederatedCredName     string
 }
 
+type AksNodePermissionsEnvironment struct {
+	ResourceGroup                  string
+	ClusterName                    string
+	ContainerRegistryName          string
+	ContainerRegistryResourceGroup string
+}
+
 var (
 	storageAccountNamePattern = regexp.MustCompile(`^[a-z0-9]{3,24}$`)
 	blobContainerNamePattern  = regexp.MustCompile(`^[a-z0-9](?:[a-z0-9-]{1,61}[a-z0-9])?$`)
@@ -200,6 +207,31 @@ func requireStorageRoleAssignmentsEnv() (*StorageRoleAssignmentsEnvironment, err
 		KSANamespace:          ksaNamespace,
 		KSAName:               ksaName,
 		FederatedCredName:     envOrDefault("AZURE_ATELET_FEDERATED_CREDENTIAL_NAME", ksaNamespace+"-"+ksaName),
+	}, nil
+}
+
+func requireAksNodePermissionsEnv() (*AksNodePermissionsEnvironment, error) {
+	requiredEnvVars := []string{
+		"AZURE_RESOURCE_GROUP",
+		"AKS_CLUSTER_NAME",
+		"AZURE_CONTAINER_REGISTRY_NAME",
+	}
+
+	missing := []string{}
+	for _, key := range requiredEnvVars {
+		if os.Getenv(key) == "" {
+			missing = append(missing, key)
+		}
+	}
+	if len(missing) > 0 {
+		return nil, fmt.Errorf("missing required environment variables for AKS node permission setup: %s", strings.Join(missing, ", "))
+	}
+
+	return &AksNodePermissionsEnvironment{
+		ResourceGroup:                  os.Getenv("AZURE_RESOURCE_GROUP"),
+		ClusterName:                    os.Getenv("AKS_CLUSTER_NAME"),
+		ContainerRegistryName:          os.Getenv("AZURE_CONTAINER_REGISTRY_NAME"),
+		ContainerRegistryResourceGroup: envOrDefault("AZURE_CONTAINER_REGISTRY_RESOURCE_GROUP", os.Getenv("AZURE_RESOURCE_GROUP")),
 	}, nil
 }
 
