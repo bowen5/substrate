@@ -213,7 +213,6 @@ create_servicedns_credential_bundle_secret() {
   log_step "create_servicedns_credential_bundle_secret"
   local tmpdir=""
   tmpdir=$(mktemp -d)
-  trap 'rm -rf "${tmpdir}"' RETURN
 
   local pool_json=""
   pool_json=$(run_kubectl get secret -n podcertificate-controller-system service-dns-ca-pool -o jsonpath='{.data.pool}' | base64 --decode)
@@ -263,6 +262,8 @@ EOF
     -n ate-system \
     --dry-run=client -o yaml \
     | run_kubectl apply -f -
+
+  rm -rf "${tmpdir}"
 }
 
 create_workerpool_ca_certs_secret() {
