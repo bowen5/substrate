@@ -24,6 +24,7 @@ import (
 
 var (
 	registerResourceProvidersFlag bool
+	createClusterFlag             bool
 	allFlag                       bool
 )
 
@@ -43,6 +44,7 @@ var rootCmd = &cobra.Command{
 			taskFunc func(context.Context, *Environment) error
 		}{
 			{"register resource providers", &registerResourceProvidersFlag, registerResourceProviders},
+			{"create cluster", &createClusterFlag, createClusterIdempotent},
 		}
 
 		if cmd.Flags().NFlag() == 0 {
@@ -80,5 +82,6 @@ func Execute() error {
 
 func init() {
 	rootCmd.Flags().BoolVar(&registerResourceProvidersFlag, "register-resource-providers", false, "Register required Azure resource providers")
+	rootCmd.Flags().BoolVar(&createClusterFlag, "create-cluster", false, "Create AKS cluster")
 	rootCmd.Flags().BoolVar(&allFlag, "all", false, "Run all setup steps")
 }
