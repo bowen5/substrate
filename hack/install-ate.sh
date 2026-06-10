@@ -77,6 +77,7 @@ function usage() {
   echo "  --create-podcertificate-controller-cas Create podcertificate controller CAs"
   echo "  --create-valkey-ca-certs-secret        Create Valkey CA certs secret"
   echo "  --create-workerpool-ca-certs-secret    Create workerpool CA certs secret for AKS dev installs"
+  echo "  --create-servicedns-credential-secret  Create service DNS credential bundle Secret for AKS dev installs"
   echo "  --create-api-server-env-vars           Create ate-api-server env vars"
   echo ""
   for demo_name in "${ATE_DEMOS[@]}"; do
@@ -208,6 +209,62 @@ create_valkey_ca_certs_secret() {
     | run_kubectl apply -f -
 }
 
+create_servicedns_credential_bundle_secret() {
+  log_step "create_servicedns_credential_bundle_secret"
+  local tmpdir=""
+  tmpdir=$(mktemp -d)
+  trap 'rm -rf "${tmpdir}"' RETURN
+
+  local pool_json=""
+  pool_json=$(run_kubectl get secret -n podcertificate-controller-system service-dns-ca-pool -o jsonpath='{.data.pool}' | base64 --decode)
+  local root_der_base64=""
+  root_der_base64=$(echo "${pool_json}" | grep -o '"RootCertificateDER":"[^"]*' | sed 's/"RootCertificateDER":"//')
+  local signing_key_base64=""
+  signing_key_base64=$(echo "${pool_json}" | grep -o '"SigningKeyPKCS8":"[^"]*' | sed 's/"SigningKeyPKCS8":"//')
+
+  echo "${root_der_base64}" | base64 --decode > "${tmpdir}/ca.der"
+  echo "${signing_key_base64}" | base64 --decode > "${tmpdir}/ca.key.der"
+  openssl x509 -inform der -in "${tmpdir}/ca.der" -out "${tmpdir}/ca.crt"
+  openssl pkey -inform der -in "${tmpdir}/ca.key.der" -out "${tmpdir}/ca.key"
+  openssl genpkey -algorithm ED25519 -out "${tmpdir}/leaf.key"
+  cat > "${tmpdir}/csr.conf" <<'EOF'
+[req]
+distinguished_name = dn
+prompt = no
+req_extensions = v3_req
+
+[dn]
+CN = ate-system.svc
+
+[v3_req]
+subjectAltName = @alt_names
+
+[alt_names]
+DNS.1 = api.ate-system.svc
+DNS.2 = valkey-cluster.ate-system.svc
+DNS.3 = valkey-cluster-service.ate-system.svc
+DNS.4 = atenet-router.ate-system.svc
+DNS.5 = *.ate-system.svc
+EOF
+  openssl req -new -key "${tmpdir}/leaf.key" -out "${tmpdir}/leaf.csr" -config "${tmpdir}/csr.conf"
+  openssl x509 -req \
+    -in "${tmpdir}/leaf.csr" \
+    -CA "${tmpdir}/ca.crt" \
+    -CAkey "${tmpdir}/ca.key" \
+    -CAcreateserial \
+    -out "${tmpdir}/leaf.crt" \
+    -days 30 \
+    -extfile "${tmpdir}/csr.conf" \
+    -extensions v3_req
+  cat "${tmpdir}/leaf.key" "${tmpdir}/leaf.crt" "${tmpdir}/ca.crt" > "${tmpdir}/credential-bundle.pem"
+
+  run_kubectl create secret generic servicedns-credential-bundle \
+    --from-file=credential-bundle.pem="${tmpdir}/credential-bundle.pem" \
+    -n ate-system \
+    --dry-run=client -o yaml \
+    | run_kubectl apply -f -
+}
+
 create_workerpool_ca_certs_secret() {
   log_step "create_workerpool_ca_certs_secret"
   local ca_certs=""
@@ -313,16 +370,14 @@ deploy_ate_system() {
 
   ensure_apiserver_prerequisites
 
-  # Deploy podcertificate-controller first so it starts signing and creating trust bundles immediately
-  run_ko apply -f manifests/ate-install/pod-certificate-controller.yaml
-  run_kubectl rollout status deployment/podcertificate-controller -n podcertificate-controller-system --timeout=120s
-
-  # Wait for both ClusterTrustBundles to be created by the controller, except on
-  # AKS where ClusterTrustBundle is not exposed and the AKS overlay mounts a
-  # static workerpool-ca-certs Secret instead.
   if [[ "$(install_platform)" == "aks" ]]; then
-    echo "Skipping ClusterTrustBundle wait on AKS; AKS overlay uses workerpool-ca-certs Secret instead."
+    echo "Skipping podcertificate-controller and ClusterTrustBundle wait on AKS; AKS overlay uses static dev Secrets instead."
   else
+    # Deploy podcertificate-controller first so it starts signing and creating trust bundles immediately
+    run_ko apply -f manifests/ate-install/pod-certificate-controller.yaml
+    run_kubectl rollout status deployment/podcertificate-controller -n podcertificate-controller-system --timeout=120s
+
+    # Wait for both ClusterTrustBundles to be created by the controller.
     echo "Waiting for podcertificate ClusterTrustBundles to be ready..."
     until run_kubectl get clustertrustbundles podidentity.podcert.ate.dev:identity:primary-bundle >/dev/null 2>&1; do
       sleep 1
@@ -364,6 +419,8 @@ ensure_apiserver_prerequisites() {
   if [[ "$(install_platform)" == "aks" ]]; then
     run_kubectl get secret -n ate-system workerpool-ca-certs >/dev/null 2>&1 \
       || create_workerpool_ca_certs_secret
+    run_kubectl get secret -n ate-system servicedns-credential-bundle >/dev/null 2>&1 \
+      || create_servicedns_credential_bundle_secret
   fi
   run_kubectl get configmap -n ate-system ate-api-server-envvars >/dev/null 2>&1 \
     || create_api_server_env_vars
@@ -488,6 +545,7 @@ while [[ "$#" -gt 0 ]]; do
     --create-podcertificate-controller-cas) create_podcertificate_controller_cas ;;
     --create-valkey-ca-certs-secret) create_valkey_ca_certs_secret ;;
     --create-workerpool-ca-certs-secret) create_workerpool_ca_certs_secret ;;
+    --create-servicedns-credential-secret) create_servicedns_credential_bundle_secret ;;
     --create-api-server-env-vars) create_api_server_env_vars ;;
 
     *)

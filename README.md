@@ -229,7 +229,7 @@ Similarly, you can deploy or cleanup specific Agent Substrate components using t
 
    The AKS overlay configures `atelet` to use Azure Workload Identity, Azure Blob snapshot storage (`ATE_STORAGE_BACKEND=azure`), and Azure ACR image-pull auth (`--azure-auth-for-image-pulls=true`). The control-plane store still uses the in-cluster Valkey deployment.
 
-   AKS development installs do not use `ClusterTrustBundle`, because tested AKS clusters may expose `podCertificate` projection without exposing the `ClusterTrustBundle` API. Instead, `hack/install-ate.sh` creates an `ate-system/workerpool-ca-certs` Secret from the `pod-identity-ca-pool`, and the AKS overlay mounts that Secret where the base manifest mounts a `ClusterTrustBundle`. This is a static dev-bootstrap workaround, not production trust-bundle rotation.
+   AKS development installs do not use Kubernetes `podCertificate` or `ClusterTrustBundle`, because tested AKS clusters exposed neither the backing `podcertificaterequests` resource nor the `ClusterTrustBundle` API needed by the base manifests. Instead, `hack/install-ate.sh` creates static dev Secrets from the generated CA pools: `ate-system/servicedns-credential-bundle` for service TLS credentials and `ate-system/workerpool-ca-certs` for workerpool trust. The AKS overlay mounts those Secrets where the base manifest uses projected certificate APIs. This is a static dev-bootstrap workaround, not production identity or trust-bundle rotation.
 
 7. Deploy a demo with an Azure Blob snapshot location:
    ```bash

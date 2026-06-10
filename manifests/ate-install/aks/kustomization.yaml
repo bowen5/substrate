@@ -22,7 +22,6 @@ resources:
   - ../atenet-dns.yaml
   - ../atenet-router.yaml
   - ../valkey.yaml
-  - ../pod-certificate-controller.yaml
 
 patches:
   - target:
@@ -35,13 +34,15 @@ patches:
       - op: replace
         path: /spec/template/spec/containers/0/env/4/value
         value: http://localhost:4317
-  - target:
-      group: apps
-      version: v1
-      kind: Deployment
-      name: ate-api-server-deployment
-      namespace: ate-system
-    patch: |-
+      - op: replace
+        path: /spec/template/spec/volumes/0
+        value:
+          name: servicedns
+          secret:
+            secretName: servicedns-credential-bundle
+            items:
+            - key: credential-bundle.pem
+              path: credential-bundle.pem
       - op: replace
         path: /spec/template/spec/volumes/4
         value:
@@ -61,3 +62,44 @@ patches:
       - op: replace
         path: /spec/template/spec/containers/0/env/4/value
         value: http://localhost:4317
+      - op: replace
+        path: /spec/template/spec/volumes/1
+        value:
+          name: servicedns
+          secret:
+            secretName: servicedns-credential-bundle
+            items:
+            - key: credential-bundle.pem
+              path: credential-bundle.pem
+  - target:
+      group: apps
+      version: v1
+      kind: StatefulSet
+      name: valkey-cluster
+      namespace: ate-system
+    patch: |-
+      - op: replace
+        path: /spec/template/spec/volumes/1
+        value:
+          name: servicedns
+          secret:
+            secretName: servicedns-credential-bundle
+            items:
+            - key: credential-bundle.pem
+              path: credential-bundle.pem
+  - target:
+      group: batch
+      version: v1
+      kind: Job
+      name: valkey-cluster-init
+      namespace: ate-system
+    patch: |-
+      - op: replace
+        path: /spec/template/spec/volumes/0
+        value:
+          name: servicedns
+          secret:
+            secretName: servicedns-credential-bundle
+            items:
+            - key: credential-bundle.pem
+              path: credential-bundle.pem
