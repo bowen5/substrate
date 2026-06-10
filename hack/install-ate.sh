@@ -115,6 +115,71 @@ run_ko() {
   esac
 }
 
+install_platform() {
+  if [[ "${ATE_INSTALL_KIND:-false}" == "true" ]]; then
+    echo "kind"
+    return
+  fi
+  echo "${ATE_INSTALL_PLATFORM:-base}"
+}
+
+require_aks_manifest_env() {
+  local missing=()
+  for key in AZURE_ATELET_CLIENT_ID AZURE_STORAGE_ACCOUNT_NAME AZURE_CONTAINER_REGISTRY_NAME; do
+    if [[ -z "${!key:-}" ]]; then
+      missing+=("${key}")
+    fi
+  done
+  if [[ ${#missing[@]} -gt 0 ]]; then
+    echo "Missing required AKS manifest environment variables: ${missing[*]}" >&2
+    return 1
+  fi
+}
+
+render_install_kustomize() {
+  local platform
+  platform=$(install_platform)
+  case "${platform}" in
+    kind)
+      kubectl kustomize manifests/ate-install/kind --load-restrictor LoadRestrictionsNone
+      ;;
+    aks)
+      require_aks_manifest_env
+      kubectl kustomize manifests/ate-install/aks --load-restrictor LoadRestrictionsNone \
+        | envsubst '${AZURE_ATELET_CLIENT_ID} ${AZURE_STORAGE_ACCOUNT_NAME} ${AZURE_CONTAINER_REGISTRY_NAME}'
+      ;;
+    base)
+      return 1
+      ;;
+    *)
+      echo "Unsupported ATE_INSTALL_PLATFORM=${platform}" >&2
+      return 1
+      ;;
+  esac
+}
+
+render_atelet_kustomize() {
+  local platform
+  platform=$(install_platform)
+  case "${platform}" in
+    kind)
+      kubectl kustomize manifests/ate-install/kind/atelet --load-restrictor LoadRestrictionsNone
+      ;;
+    aks)
+      require_aks_manifest_env
+      kubectl kustomize manifests/ate-install/aks/atelet --load-restrictor LoadRestrictionsNone \
+        | envsubst '${AZURE_ATELET_CLIENT_ID} ${AZURE_STORAGE_ACCOUNT_NAME} ${AZURE_CONTAINER_REGISTRY_NAME}'
+      ;;
+    base)
+      return 1
+      ;;
+    *)
+      echo "Unsupported ATE_INSTALL_PLATFORM=${platform}" >&2
+      return 1
+      ;;
+  esac
+}
+
 create_valkey_ca_certs_secret() {
   log_step "create_valkey_ca_certs_secret"
   local ca_certs=""
@@ -237,12 +302,12 @@ deploy_ate_system() {
   done
 
   local manifests=""
-  if [[ "${ATE_INSTALL_KIND:-false}" == "true" ]]; then
-    # Build everything resolved with Kustomize for Kind
-    manifests=$(kubectl kustomize manifests/ate-install/kind --load-restrictor LoadRestrictionsNone | run_ko resolve -f -)
-  else
+  if [[ "$(install_platform)" == "base" ]]; then
     # Build everything resolved with base manifests for GKE
     manifests=$(run_ko resolve -f manifests/ate-install)
+  else
+    # Build everything resolved with the selected platform Kustomize overlay.
+    manifests=$(render_install_kustomize | run_ko resolve -f -)
   fi
   echo "${manifests}" | run_kubectl apply -f -
 
@@ -293,12 +358,12 @@ deploy_atelet() {
     && run_kubectl wait --for=jsonpath='{.status.phase}'=Active namespace/ate-system --timeout=60s
 
   local manifest=""
-  if [[ "${ATE_INSTALL_KIND:-false}" == "true" ]]; then
-    # Use Kustomize to build and resolve the atelet DaemonSet patch
-    manifest=$(kubectl kustomize manifests/ate-install/kind/atelet --load-restrictor LoadRestrictionsNone | run_ko resolve -f -)
-  else
+  if [[ "$(install_platform)" == "base" ]]; then
     # Use base manifest for GKE
     manifest=$(run_ko resolve -f manifests/ate-install/atelet.yaml)
+  else
+    # Use Kustomize to build and resolve the selected platform atelet patch.
+    manifest=$(render_atelet_kustomize | run_ko resolve -f -)
   fi
   echo "${manifest}" | run_kubectl apply -f -
   run_kubectl rollout status daemonset/atelet -n ate-system --timeout=120s
@@ -320,11 +385,11 @@ deploy_atenet() {
 
 delete_ate_system() {
   log_step "delete_ate_system"
-  if [[ "${ATE_INSTALL_KIND:-false}" == "true" ]]; then
-    kubectl kustomize manifests/ate-install/kind --load-restrictor LoadRestrictionsNone \
-      | run_kubectl delete --ignore-not-found -f -
-  else
+  if [[ "$(install_platform)" == "base" ]]; then
     run_kubectl delete --ignore-not-found -f manifests/ate-install
+  else
+    render_install_kustomize \
+      | run_kubectl delete --ignore-not-found -f -
   fi
   run_kubectl delete --ignore-not-found -f manifests/ate-install/generated
 }

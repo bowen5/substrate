@@ -139,6 +139,12 @@ func ensureAteletWorkloadIdentity(ctx context.Context, clustersClient *armcontai
 	if err != nil {
 		return "", err
 	}
+	clientID, err := userAssignedIdentityClientID(identity, env.IdentityName)
+	if err != nil {
+		return "", err
+	}
+	slog.Info("Atelet managed identity client ID", slog.String("identity", env.IdentityName), slog.String("clientID", clientID))
+	fmt.Printf("AZURE_ATELET_CLIENT_ID=%s\n", clientID)
 
 	if err := createAteletFederatedCredentialIdempotent(ctx, federatedCredsClient, env, issuerURL); err != nil {
 		return "", err
@@ -190,6 +196,13 @@ func userAssignedIdentityPrincipalID(identity armmsi.Identity, identityName stri
 		return "", fmt.Errorf("managed identity %s has no principal ID in Azure response", identityName)
 	}
 	return *identity.Properties.PrincipalID, nil
+}
+
+func userAssignedIdentityClientID(identity armmsi.Identity, identityName string) (string, error) {
+	if identity.Properties == nil || identity.Properties.ClientID == nil || *identity.Properties.ClientID == "" {
+		return "", fmt.Errorf("managed identity %s has no client ID in Azure response", identityName)
+	}
+	return *identity.Properties.ClientID, nil
 }
 
 func createAteletFederatedCredentialIdempotent(ctx context.Context, client *armmsi.FederatedIdentityCredentialsClient, env *AteletWorkloadIdentityEnvironment, issuerURL string) error {

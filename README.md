@@ -207,7 +207,13 @@ Similarly, you can deploy or cleanup specific Agent Substrate components using t
    go run ./tools/setup-azure --all
    ```
 
-   This registers Azure resource providers, creates the AKS cluster, creates snapshot storage, configures the `atelet` workload identity, grants the AKS kubelet identity `AcrPull` on ACR, and grants `atelet` snapshot-storage and ACR permissions.
+   This registers Azure resource providers, creates the AKS cluster, creates snapshot storage, configures the `atelet` workload identity, grants the AKS kubelet identity `AcrPull` on ACR, and grants `atelet` snapshot-storage and ACR permissions. The setup tool prints `AZURE_ATELET_CLIENT_ID=<client-id>` after creating or finding the managed identity; copy that value into `.ate-dev-env.sh`. You can also fetch it manually:
+   ```bash
+   export AZURE_ATELET_CLIENT_ID=$(az identity show \
+     --resource-group ${AZURE_ATELET_IDENTITY_RESOURCE_GROUP} \
+     --name ${AZURE_ATELET_IDENTITY_NAME} \
+     --query clientId -o tsv)
+   ```
 
 5. Authenticate local image pushes to ACR and configure `ko`:
    ```bash
@@ -215,7 +221,21 @@ Similarly, you can deploy or cleanup specific Agent Substrate components using t
    export KO_DOCKER_REPO=${AZURE_CONTAINER_REGISTRY_NAME}.azurecr.io/ate-images
    ```
 
-> Note: the Azure provisioning path currently does not create monitoring dashboards, and the runtime deployment still needs Azure-specific storage/backend and manifest wiring before it is equivalent to the GKE path.
+6. Deploy the Agent Substrate system using the AKS overlay:
+   ```bash
+   export ATE_INSTALL_PLATFORM=aks
+   ./hack/install-ate.sh --deploy-ate-system
+   ```
+
+   The AKS overlay configures `atelet` to use Azure Workload Identity, Azure Blob snapshot storage (`ATE_STORAGE_BACKEND=azure`), and Azure ACR image-pull auth (`--azure-auth-for-image-pulls=true`). The control-plane store still uses the in-cluster Valkey deployment.
+
+7. Deploy a demo with an Azure Blob snapshot location:
+   ```bash
+   export SNAPSHOT_LOCATION=azblob://${AZURE_STORAGE_CONTAINER_NAME}/ate-demo-counter/
+   ./hack/install-ate.sh --deploy-demo-counter
+   ```
+
+> Note: the Azure provisioning path currently does not create monitoring dashboards. Azure-managed Redis/Azure Cache integration is also intentionally out of scope for this development path; the AKS runtime uses in-cluster Valkey for now.
 
 #### Tearing down resources (GCP)
 

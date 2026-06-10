@@ -33,7 +33,9 @@ import (
 )
 
 type MemoryPullCache struct {
-	gcpAuthenticator authn.Authenticator
+	gcpAuthenticator   authn.Authenticator
+	azureAuthenticator authn.Authenticator
+	azureRegistryHost  string
 
 	localhostRegistryReplacement string
 
@@ -42,7 +44,7 @@ type MemoryPullCache struct {
 	cache *lru.Cache
 }
 
-func NewMemoryPullCache(ctx context.Context, gcpAuthenticator authn.Authenticator, localhostRegistryReplacement string) (*MemoryPullCache, error) {
+func NewMemoryPullCache(ctx context.Context, gcpAuthenticator authn.Authenticator, azureAuthenticator authn.Authenticator, azureRegistryHost string, localhostRegistryReplacement string) (*MemoryPullCache, error) {
 	c := &MemoryPullCache{
 		// TODO: Need a smarter cache with bounds on total consumed size, not
 		// just number of entries.  Potentially also try to share the cache
@@ -61,6 +63,8 @@ func NewMemoryPullCache(ctx context.Context, gcpAuthenticator authn.Authenticato
 	}
 
 	c.gcpAuthenticator = gcpAuthenticator
+	c.azureAuthenticator = azureAuthenticator
+	c.azureRegistryHost = azureRegistryHost
 
 	return c, nil
 }
@@ -130,6 +134,11 @@ func (c *MemoryPullCache) Fetch(ctx context.Context, ref string) (io.ReadCloser,
 	if registry == "gcr.io" || strings.HasSuffix(registry, ".gcr.io") || registry == "pkg.dev" || strings.HasSuffix(registry, ".pkg.dev") {
 		if c.gcpAuthenticator != nil {
 			remoteOptions = append(remoteOptions, remote.WithAuth(c.gcpAuthenticator))
+		}
+	}
+	if c.azureRegistryHost != "" && registry == c.azureRegistryHost {
+		if c.azureAuthenticator != nil {
+			remoteOptions = append(remoteOptions, remote.WithAuth(c.azureAuthenticator))
 		}
 	}
 

@@ -49,7 +49,17 @@ export AZURE_ATELET_IDENTITY_RESOURCE_GROUP=${AZURE_RESOURCE_GROUP}
 export AZURE_ATELET_IDENTITY_NAME=atelet
 export AZURE_ATELET_KSA_NAMESPACE=ate-system
 export AZURE_ATELET_KSA_NAME=atelet
+# tools/setup-azure prints this value after creating/finding the identity.
+# You can also fetch it manually:
+#   az identity show --resource-group ${AZURE_ATELET_IDENTITY_RESOURCE_GROUP} --name ${AZURE_ATELET_IDENTITY_NAME} --query clientId -o tsv
+export AZURE_ATELET_CLIENT_ID=
 export AZURE_ATELET_FEDERATED_CREDENTIAL_NAME=${AZURE_ATELET_KSA_NAMESPACE}-${AZURE_ATELET_KSA_NAME}
+
+# Select the AKS manifest overlay in hack/install-ate.sh.
+export ATE_INSTALL_PLATFORM=aks
+
+# Snapshot location for demo ActorTemplates on Azure Blob.
+export SNAPSHOT_LOCATION=azblob://${AZURE_STORAGE_CONTAINER_NAME}/ate-demo-counter/
 
 # ko image destination for AKS/ACR.
 export KO_DOCKER_REPO=${AZURE_CONTAINER_REGISTRY_NAME}.azurecr.io/ate-images

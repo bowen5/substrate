@@ -30,9 +30,12 @@ import (
 	"strings"
 
 	"cloud.google.com/go/storage"
+	"github.com/Azure/azure-sdk-for-go/sdk/azidentity"
+	"github.com/Azure/azure-sdk-for-go/sdk/storage/azblob"
 	"github.com/agent-substrate/substrate/cmd/atelet/internal/ategcs"
 	"github.com/agent-substrate/substrate/internal/ateinterceptors"
 	"github.com/agent-substrate/substrate/internal/ateompath"
+	"github.com/agent-substrate/substrate/internal/azurecontainerauth"
 	"github.com/agent-substrate/substrate/internal/memorypullcache"
 	"github.com/agent-substrate/substrate/internal/proto/ateletpb"
 	"github.com/agent-substrate/substrate/internal/proto/ateompb"
@@ -61,6 +64,7 @@ var (
 	metricsListenAddr = pflag.String("metrics-listen-addr", ":9090", "Address and port the prometheus metrics server should listen on.")
 
 	gcpAuthForImagePulls         = pflag.Bool("gcp-auth-for-image-pulls", true, "Use GCP application default credentials mechanism.")
+	azureAuthForImagePulls       = pflag.Bool("azure-auth-for-image-pulls", false, "Use Azure managed identity credentials for ACR image pulls.")
 	localhostRegistryReplacement = pflag.String("localhost-registry-replacement", "", "The replacement registry endpoint for localhost and/or loopback IP addresses, useful for local development. for example kind-registry:5000")
 
 	showVersion = pflag.Bool("version", false, "Print version and exit.")
@@ -108,7 +112,20 @@ func main() {
 		}
 	}
 
-	pullCache, err := memorypullcache.NewMemoryPullCache(ctx, gcpRegistryAuthn, *localhostRegistryReplacement)
+	var azureRegistryAuthn authn.Authenticator
+	azureRegistryHost := azureContainerRegistryHost()
+	if *azureAuthForImagePulls {
+		cred, err := azidentity.NewDefaultAzureCredential(nil)
+		if err != nil {
+			serverboot.Fatal(ctx, "Failed to create Azure credential for image pulls", err)
+		}
+		azureRegistryAuthn, err = azurecontainerauth.NewACRAuthenticator(azureRegistryHost, cred)
+		if err != nil {
+			serverboot.Fatal(ctx, "Failed to create Azure registry authenticator", err)
+		}
+	}
+
+	pullCache, err := memorypullcache.NewMemoryPullCache(ctx, gcpRegistryAuthn, azureRegistryAuthn, azureRegistryHost, *localhostRegistryReplacement)
 	if err != nil {
 		serverboot.Fatal(ctx, "Failed to create pull cache", err)
 	}
@@ -120,6 +137,7 @@ func main() {
 
 	var gcsClient *storage.Client
 	var s3Client *s3.Client
+	var azureClient *azblob.Client
 	storageBackend := os.Getenv("ATE_STORAGE_BACKEND")
 	switch storageBackend {
 	case "s3":
@@ -135,6 +153,20 @@ func main() {
 				o.UsePathStyle = true
 			}
 		})
+	case "azure":
+		slog.InfoContext(ctx, "Using Azure Blob storage backend")
+		cred, err := azidentity.NewDefaultAzureCredential(nil)
+		if err != nil {
+			serverboot.Fatal(ctx, "Failed to create Azure credential for Blob storage", err)
+		}
+		accountURL := azureStorageAccountURL()
+		if accountURL == "" {
+			serverboot.Fatal(ctx, "Missing Azure Blob storage account configuration", fmt.Errorf("AZURE_STORAGE_ACCOUNT_NAME or AZURE_STORAGE_ACCOUNT_URL is required"))
+		}
+		azureClient, err = azblob.NewClient(accountURL, cred, nil)
+		if err != nil {
+			serverboot.Fatal(ctx, "Failed to create Azure Blob client", err)
+		}
 	// GCS is currently the default, TODO: we assume workload identity / ADC
 	default:
 		gcsClient, err = storage.NewClient(ctx)
@@ -151,6 +183,8 @@ func main() {
 	var wrappedGCS ategcs.ObjectStorage
 	if s3Client != nil {
 		wrappedGCS = ategcs.NewS3Client(s3Client)
+	} else if azureClient != nil {
+		wrappedGCS = ategcs.NewAzureBlobClient(azureClient)
 	} else if gcsClient != nil {
 		wrappedGCS = ategcs.NewGCSClient(gcsClient)
 	}
@@ -205,6 +239,28 @@ func NewService(
 		gcsClient:     gcsClient,
 	}
 	return wms
+}
+
+func azureStorageAccountURL() string {
+	if accountURL := os.Getenv("AZURE_STORAGE_ACCOUNT_URL"); accountURL != "" {
+		return strings.TrimRight(accountURL, "/") + "/"
+	}
+	accountName := os.Getenv("AZURE_STORAGE_ACCOUNT_NAME")
+	if accountName == "" {
+		return ""
+	}
+	return "https://" + accountName + ".blob.core.windows.net/"
+}
+
+func azureContainerRegistryHost() string {
+	if loginServer := os.Getenv("AZURE_CONTAINER_REGISTRY_LOGIN_SERVER"); loginServer != "" {
+		return strings.TrimSuffix(strings.TrimPrefix(strings.TrimPrefix(loginServer, "https://"), "http://"), "/")
+	}
+	registryName := os.Getenv("AZURE_CONTAINER_REGISTRY_NAME")
+	if registryName == "" {
+		return ""
+	}
+	return registryName + ".azurecr.io"
 }
 
 func (s *AteomHerder) fetchRunsc(ctx context.Context, cfg *ateletpb.RunscConfig) (string, error) {

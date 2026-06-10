@@ -186,10 +186,28 @@ func fetchFromGCSWithZstd(ctx context.Context, client ObjectStorage, gsURL strin
 }
 
 func parseGCSURL(gsURL string) (string, string, error) {
-	parsed, err := url.Parse(gsURL)
+	return parseObjectURL(gsURL)
+}
+
+func parseObjectURL(rawURL string) (string, string, error) {
+	parsed, err := url.Parse(rawURL)
 	if err != nil {
-		return "", "", fmt.Errorf("while parsing %q: %w", gsURL, err)
+		return "", "", fmt.Errorf("while parsing %q: %w", rawURL, err)
 	}
 
-	return parsed.Host, strings.TrimPrefix(parsed.Path, "/"), nil
+	switch parsed.Scheme {
+	case "gs", "s3", "azblob":
+		// Supported object-storage schemes.
+	default:
+		return "", "", fmt.Errorf("unsupported object storage scheme %q in %q", parsed.Scheme, rawURL)
+	}
+	if parsed.Host == "" {
+		return "", "", fmt.Errorf("missing object storage bucket/container in %q", rawURL)
+	}
+	object := strings.TrimPrefix(parsed.Path, "/")
+	if object == "" {
+		return "", "", fmt.Errorf("missing object name in %q", rawURL)
+	}
+
+	return parsed.Host, object, nil
 }

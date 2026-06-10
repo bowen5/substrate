@@ -32,7 +32,8 @@ demo-counter_cmdline() {
 demo-counter_deploy() {
   log_step "demo-counter_deploy"
   ensure_crds
-  sed "s|\${BUCKET_NAME}|${BUCKET_NAME}|g" demos/counter/counter.yaml.tmpl \
+  local snapshot_location="${SNAPSHOT_LOCATION:-gs://${BUCKET_NAME}/ate-demo-counter/}"
+  sed "s|\${SNAPSHOT_LOCATION}|${snapshot_location}|g" demos/counter/counter.yaml.tmpl \
     | run_ko apply -f -
 
   # Wait for the demo to be fully ready before returning. On a cold cluster the
@@ -48,6 +49,7 @@ demo-counter_deploy() {
 
 demo-counter_delete() {
   log_step "demo-counter_delete"
-  sed "s|\${BUCKET_NAME}|${BUCKET_NAME}|g" demos/counter/counter.yaml.tmpl \
+  local snapshot_location="${SNAPSHOT_LOCATION:-gs://${BUCKET_NAME}/ate-demo-counter/}"
+  sed "s|\${SNAPSHOT_LOCATION}|${snapshot_location}|g" demos/counter/counter.yaml.tmpl \
     | run_kubectl delete --ignore-not-found -f -
 }
