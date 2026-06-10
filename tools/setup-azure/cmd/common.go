@@ -86,7 +86,7 @@ func requireClusterEnv() (*ClusterEnvironment, error) {
 		ResourceGroup:     os.Getenv("AZURE_RESOURCE_GROUP"),
 		Location:          os.Getenv("AZURE_LOCATION"),
 		ClusterName:       clusterName,
-		KubernetesVersion: os.Getenv("AKS_KUBERNETES_VERSION"),
+		KubernetesVersion: envOrDefault("AKS_KUBERNETES_VERSION", "1.34.8"),
 		NodePoolName:      envOrDefault("AKS_NODE_POOL_NAME", "substrate"),
 		NodeCount:         nodeCount,
 		NodeVMSize:        envOrDefault("AKS_NODE_VM_SIZE", "Standard_D4ads_v5"),
