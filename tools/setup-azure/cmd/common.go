@@ -46,6 +46,19 @@ type SnapshotStorageEnvironment struct {
 	SKUName       string
 }
 
+type StorageRoleAssignmentsEnvironment struct {
+	ResourceGroup         string
+	Location              string
+	ClusterName           string
+	StorageAccountName    string
+	StorageContainerName  string
+	IdentityResourceGroup string
+	IdentityName          string
+	KSANamespace          string
+	KSAName               string
+	FederatedCredName     string
+}
+
 var (
 	storageAccountNamePattern = regexp.MustCompile(`^[a-z0-9]{3,24}$`)
 	blobContainerNamePattern  = regexp.MustCompile(`^[a-z0-9](?:[a-z0-9-]{1,61}[a-z0-9])?$`)
@@ -142,6 +155,51 @@ func requireSnapshotStorageEnv() (*SnapshotStorageEnvironment, error) {
 		AccountName:   accountName,
 		ContainerName: containerName,
 		SKUName:       envOrDefault("AZURE_STORAGE_ACCOUNT_SKU", "Standard_LRS"),
+	}, nil
+}
+
+func requireStorageRoleAssignmentsEnv() (*StorageRoleAssignmentsEnvironment, error) {
+	requiredEnvVars := []string{
+		"AZURE_RESOURCE_GROUP",
+		"AZURE_LOCATION",
+		"AKS_CLUSTER_NAME",
+		"AZURE_STORAGE_ACCOUNT_NAME",
+	}
+
+	missing := []string{}
+	for _, key := range requiredEnvVars {
+		if os.Getenv(key) == "" {
+			missing = append(missing, key)
+		}
+	}
+	if len(missing) > 0 {
+		return nil, fmt.Errorf("missing required environment variables for storage role assignment setup: %s", strings.Join(missing, ", "))
+	}
+
+	accountName := os.Getenv("AZURE_STORAGE_ACCOUNT_NAME")
+	if !storageAccountNamePattern.MatchString(accountName) {
+		return nil, fmt.Errorf("AZURE_STORAGE_ACCOUNT_NAME must be 3-24 characters using only lowercase letters and numbers")
+	}
+
+	containerName := envOrDefault("AZURE_STORAGE_CONTAINER_NAME", "ate-snapshots")
+	if !blobContainerNamePattern.MatchString(containerName) || strings.Contains(containerName, "--") {
+		return nil, fmt.Errorf("AZURE_STORAGE_CONTAINER_NAME must be 3-63 characters using lowercase letters, numbers, and single dashes; dashes must be between letters or numbers")
+	}
+
+	ksaNamespace := envOrDefault("AZURE_ATELET_KSA_NAMESPACE", "ate-system")
+	ksaName := envOrDefault("AZURE_ATELET_KSA_NAME", "atelet")
+
+	return &StorageRoleAssignmentsEnvironment{
+		ResourceGroup:         os.Getenv("AZURE_RESOURCE_GROUP"),
+		Location:              os.Getenv("AZURE_LOCATION"),
+		ClusterName:           os.Getenv("AKS_CLUSTER_NAME"),
+		StorageAccountName:    accountName,
+		StorageContainerName:  containerName,
+		IdentityResourceGroup: envOrDefault("AZURE_ATELET_IDENTITY_RESOURCE_GROUP", os.Getenv("AZURE_RESOURCE_GROUP")),
+		IdentityName:          envOrDefault("AZURE_ATELET_IDENTITY_NAME", "atelet"),
+		KSANamespace:          ksaNamespace,
+		KSAName:               ksaName,
+		FederatedCredName:     envOrDefault("AZURE_ATELET_FEDERATED_CREDENTIAL_NAME", ksaNamespace+"-"+ksaName),
 	}, nil
 }
 
