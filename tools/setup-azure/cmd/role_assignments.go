@@ -34,8 +34,47 @@ const (
 	storageBlobDataContributorRoleID = "ba92f5b4-2d11-453d-a403-e96b0029c9fe"
 )
 
-func createStorageRoleAssignments(ctx context.Context, env *Environment) error {
-	roleEnv, err := requireStorageRoleAssignmentsEnv()
+func createAteletWorkloadIdentity(ctx context.Context, env *Environment) error {
+	identityEnv, err := requireAteletWorkloadIdentityEnv()
+	if err != nil {
+		return err
+	}
+
+	cred, err := azidentity.NewDefaultAzureCredential(nil)
+	if err != nil {
+		return fmt.Errorf("create Azure default credential: %w", err)
+	}
+
+	resourceGroupsClient, err := armresources.NewResourceGroupsClient(env.SubscriptionID, cred, nil)
+	if err != nil {
+		return fmt.Errorf("create Azure resource groups client: %w", err)
+	}
+
+	clustersClient, err := armcontainerservice.NewManagedClustersClient(env.SubscriptionID, cred, nil)
+	if err != nil {
+		return fmt.Errorf("create Azure managed clusters client: %w", err)
+	}
+
+	identitiesClient, err := armmsi.NewUserAssignedIdentitiesClient(env.SubscriptionID, cred, nil)
+	if err != nil {
+		return fmt.Errorf("create Azure user assigned identities client: %w", err)
+	}
+
+	federatedCredsClient, err := armmsi.NewFederatedIdentityCredentialsClient(env.SubscriptionID, cred, nil)
+	if err != nil {
+		return fmt.Errorf("create Azure federated identity credentials client: %w", err)
+	}
+
+	if err := createResourceGroup(ctx, resourceGroupsClient, identityEnv.IdentityResourceGroup, identityEnv.Location); err != nil {
+		return err
+	}
+
+	_, err = ensureAteletWorkloadIdentity(ctx, clustersClient, identitiesClient, federatedCredsClient, identityEnv)
+	return err
+}
+
+func grantAteletPermissions(ctx context.Context, env *Environment) error {
+	permissionsEnv, err := requireAteletPermissionsEnv()
 	if err != nil {
 		return err
 	}
@@ -70,33 +109,45 @@ func createStorageRoleAssignments(ctx context.Context, env *Environment) error {
 		return fmt.Errorf("create Azure role assignments client: %w", err)
 	}
 
-	if err := createResourceGroup(ctx, resourceGroupsClient, roleEnv.IdentityResourceGroup, roleEnv.Location); err != nil {
+	if err := createResourceGroup(ctx, resourceGroupsClient, permissionsEnv.IdentityResourceGroup, permissionsEnv.Location); err != nil {
 		return err
 	}
 
-	issuerURL, err := aksOIDCIssuerURL(ctx, clustersClient, roleEnv)
+	principalID, err := ensureAteletWorkloadIdentity(ctx, clustersClient, identitiesClient, federatedCredsClient, &permissionsEnv.AteletWorkloadIdentityEnvironment)
 	if err != nil {
 		return err
 	}
 
-	identity, err := createAteletIdentityIdempotent(ctx, identitiesClient, roleEnv)
-	if err != nil {
+	if err := createSnapshotStorageRoleAssignmentIdempotent(ctx, roleAssignmentsClient, env.SubscriptionID, permissionsEnv, principalID); err != nil {
 		return err
 	}
-
-	principalID, err := userAssignedIdentityPrincipalID(identity, roleEnv.IdentityName)
-	if err != nil {
-		return err
-	}
-
-	if err := createAteletFederatedCredentialIdempotent(ctx, federatedCredsClient, roleEnv, issuerURL); err != nil {
-		return err
-	}
-
-	return createSnapshotStorageRoleAssignmentIdempotent(ctx, roleAssignmentsClient, env.SubscriptionID, roleEnv, principalID)
+	return createAteletAcrPullRoleAssignmentIdempotent(ctx, roleAssignmentsClient, env.SubscriptionID, permissionsEnv, principalID)
 }
 
-func aksOIDCIssuerURL(ctx context.Context, client *armcontainerservice.ManagedClustersClient, env *StorageRoleAssignmentsEnvironment) (string, error) {
+func ensureAteletWorkloadIdentity(ctx context.Context, clustersClient *armcontainerservice.ManagedClustersClient, identitiesClient *armmsi.UserAssignedIdentitiesClient, federatedCredsClient *armmsi.FederatedIdentityCredentialsClient, env *AteletWorkloadIdentityEnvironment) (string, error) {
+	issuerURL, err := aksOIDCIssuerURL(ctx, clustersClient, env)
+	if err != nil {
+		return "", err
+	}
+
+	identity, err := createAteletIdentityIdempotent(ctx, identitiesClient, env)
+	if err != nil {
+		return "", err
+	}
+
+	principalID, err := userAssignedIdentityPrincipalID(identity, env.IdentityName)
+	if err != nil {
+		return "", err
+	}
+
+	if err := createAteletFederatedCredentialIdempotent(ctx, federatedCredsClient, env, issuerURL); err != nil {
+		return "", err
+	}
+
+	return principalID, nil
+}
+
+func aksOIDCIssuerURL(ctx context.Context, client *armcontainerservice.ManagedClustersClient, env *AteletWorkloadIdentityEnvironment) (string, error) {
 	slog.Info("Getting AKS OIDC issuer URL", slog.String("resourceGroup", env.ResourceGroup), slog.String("cluster", env.ClusterName))
 	resp, err := client.Get(ctx, env.ResourceGroup, env.ClusterName, nil)
 	if err != nil {
@@ -108,7 +159,7 @@ func aksOIDCIssuerURL(ctx context.Context, client *armcontainerservice.ManagedCl
 	return *resp.ManagedCluster.Properties.OidcIssuerProfile.IssuerURL, nil
 }
 
-func createAteletIdentityIdempotent(ctx context.Context, client *armmsi.UserAssignedIdentitiesClient, env *StorageRoleAssignmentsEnvironment) (armmsi.Identity, error) {
+func createAteletIdentityIdempotent(ctx context.Context, client *armmsi.UserAssignedIdentitiesClient, env *AteletWorkloadIdentityEnvironment) (armmsi.Identity, error) {
 	slog.Info("Checking if atelet managed identity exists", slog.String("resourceGroup", env.IdentityResourceGroup), slog.String("identity", env.IdentityName))
 	resp, err := client.Get(ctx, env.IdentityResourceGroup, env.IdentityName, nil)
 	if err != nil {
@@ -141,7 +192,7 @@ func userAssignedIdentityPrincipalID(identity armmsi.Identity, identityName stri
 	return *identity.Properties.PrincipalID, nil
 }
 
-func createAteletFederatedCredentialIdempotent(ctx context.Context, client *armmsi.FederatedIdentityCredentialsClient, env *StorageRoleAssignmentsEnvironment, issuerURL string) error {
+func createAteletFederatedCredentialIdempotent(ctx context.Context, client *armmsi.FederatedIdentityCredentialsClient, env *AteletWorkloadIdentityEnvironment, issuerURL string) error {
 	subject := fmt.Sprintf("system:serviceaccount:%s:%s", env.KSANamespace, env.KSAName)
 
 	slog.Info("Checking if atelet federated identity credential exists", slog.String("identity", env.IdentityName), slog.String("credential", env.FederatedCredName))
@@ -183,19 +234,29 @@ func createAteletFederatedCredentialIdempotent(ctx context.Context, client *armm
 	return nil
 }
 
-func createSnapshotStorageRoleAssignmentIdempotent(ctx context.Context, client *armauthorization.RoleAssignmentsClient, subscriptionID string, env *StorageRoleAssignmentsEnvironment, principalID string) error {
+func createSnapshotStorageRoleAssignmentIdempotent(ctx context.Context, client *armauthorization.RoleAssignmentsClient, subscriptionID string, env *AteletPermissionsEnvironment, principalID string) error {
 	scope := snapshotContainerScope(subscriptionID, env)
 	roleDefinitionID := storageBlobDataContributorRoleDefinitionID(subscriptionID)
+	return createRoleAssignmentIdempotent(ctx, client, scope, roleDefinitionID, principalID, "atelet snapshot storage")
+}
+
+func createAteletAcrPullRoleAssignmentIdempotent(ctx context.Context, client *armauthorization.RoleAssignmentsClient, subscriptionID string, env *AteletPermissionsEnvironment, principalID string) error {
+	scope := acrScope(subscriptionID, env.ContainerRegistryResourceGroup, env.ContainerRegistryName)
+	roleDefinitionID := acrPullRoleDefinitionID(subscriptionID)
+	return createRoleAssignmentIdempotent(ctx, client, scope, roleDefinitionID, principalID, "atelet AcrPull")
+}
+
+func createRoleAssignmentIdempotent(ctx context.Context, client *armauthorization.RoleAssignmentsClient, scope, roleDefinitionID, principalID, label string) error {
 	assignmentName := deterministicRoleAssignmentName(scope, roleDefinitionID, principalID)
 
-	slog.Info("Checking if snapshot storage role assignment exists", slog.String("scope", scope), slog.String("roleAssignment", assignmentName))
+	slog.Info("Checking if role assignment exists", slog.String("label", label), slog.String("scope", scope), slog.String("roleAssignment", assignmentName))
 	resp, err := client.Get(ctx, scope, assignmentName, nil)
 	if err != nil {
 		if !isNotFound(err) {
 			return fmt.Errorf("get role assignment %s: %w", assignmentName, err)
 		}
 
-		slog.Info("Snapshot storage role assignment does not exist. Creating...", slog.String("scope", scope), slog.String("principalID", principalID))
+		slog.Info("Role assignment does not exist. Creating...", slog.String("label", label), slog.String("scope", scope), slog.String("principalID", principalID))
 		_, err = client.Create(ctx, scope, assignmentName, armauthorization.RoleAssignmentCreateParameters{
 			Properties: &armauthorization.RoleAssignmentProperties{
 				PrincipalID:      to.Ptr(principalID),
@@ -219,11 +280,11 @@ func createSnapshotStorageRoleAssignmentIdempotent(ctx context.Context, client *
 		return fmt.Errorf("role assignment %s role definition mismatch; current=%q expected=%q", assignmentName, stringPtrValue(props.RoleDefinitionID), roleDefinitionID)
 	}
 
-	slog.Info("Snapshot storage role assignment already exists", slog.String("scope", scope), slog.String("roleAssignment", assignmentName))
+	slog.Info("Role assignment already exists", slog.String("label", label), slog.String("scope", scope), slog.String("roleAssignment", assignmentName))
 	return nil
 }
 
-func snapshotContainerScope(subscriptionID string, env *StorageRoleAssignmentsEnvironment) string {
+func snapshotContainerScope(subscriptionID string, env *AteletPermissionsEnvironment) string {
 	return fmt.Sprintf("/subscriptions/%s/resourceGroups/%s/providers/Microsoft.Storage/storageAccounts/%s/blobServices/default/containers/%s", subscriptionID, env.ResourceGroup, env.StorageAccountName, env.StorageContainerName)
 }
 

@@ -75,7 +75,7 @@ func aksKubeletIdentityPrincipalID(ctx context.Context, client *armcontainerserv
 }
 
 func createAcrPullRoleAssignmentIdempotent(ctx context.Context, client *armauthorization.RoleAssignmentsClient, subscriptionID string, env *AksNodePermissionsEnvironment, principalID string) error {
-	scope := acrScope(subscriptionID, env)
+	scope := acrScope(subscriptionID, env.ContainerRegistryResourceGroup, env.ContainerRegistryName)
 	roleDefinitionID := acrPullRoleDefinitionID(subscriptionID)
 	assignmentName := deterministicRoleAssignmentName(scope, roleDefinitionID, principalID)
 
@@ -114,8 +114,8 @@ func createAcrPullRoleAssignmentIdempotent(ctx context.Context, client *armautho
 	return nil
 }
 
-func acrScope(subscriptionID string, env *AksNodePermissionsEnvironment) string {
-	return fmt.Sprintf("/subscriptions/%s/resourceGroups/%s/providers/Microsoft.ContainerRegistry/registries/%s", subscriptionID, env.ContainerRegistryResourceGroup, env.ContainerRegistryName)
+func acrScope(subscriptionID, resourceGroup, registryName string) string {
+	return fmt.Sprintf("/subscriptions/%s/resourceGroups/%s/providers/Microsoft.ContainerRegistry/registries/%s", subscriptionID, resourceGroup, registryName)
 }
 
 func acrPullRoleDefinitionID(subscriptionID string) string {

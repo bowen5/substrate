@@ -46,17 +46,23 @@ type SnapshotStorageEnvironment struct {
 	SKUName       string
 }
 
-type StorageRoleAssignmentsEnvironment struct {
+type AteletWorkloadIdentityEnvironment struct {
 	ResourceGroup         string
 	Location              string
 	ClusterName           string
-	StorageAccountName    string
-	StorageContainerName  string
 	IdentityResourceGroup string
 	IdentityName          string
 	KSANamespace          string
 	KSAName               string
 	FederatedCredName     string
+}
+
+type AteletPermissionsEnvironment struct {
+	AteletWorkloadIdentityEnvironment
+	StorageAccountName             string
+	StorageContainerName           string
+	ContainerRegistryName          string
+	ContainerRegistryResourceGroup string
 }
 
 type AksNodePermissionsEnvironment struct {
@@ -165,12 +171,11 @@ func requireSnapshotStorageEnv() (*SnapshotStorageEnvironment, error) {
 	}, nil
 }
 
-func requireStorageRoleAssignmentsEnv() (*StorageRoleAssignmentsEnvironment, error) {
+func requireAteletWorkloadIdentityEnv() (*AteletWorkloadIdentityEnvironment, error) {
 	requiredEnvVars := []string{
 		"AZURE_RESOURCE_GROUP",
 		"AZURE_LOCATION",
 		"AKS_CLUSTER_NAME",
-		"AZURE_STORAGE_ACCOUNT_NAME",
 	}
 
 	missing := []string{}
@@ -180,7 +185,43 @@ func requireStorageRoleAssignmentsEnv() (*StorageRoleAssignmentsEnvironment, err
 		}
 	}
 	if len(missing) > 0 {
-		return nil, fmt.Errorf("missing required environment variables for storage role assignment setup: %s", strings.Join(missing, ", "))
+		return nil, fmt.Errorf("missing required environment variables for atelet workload identity setup: %s", strings.Join(missing, ", "))
+	}
+
+	ksaNamespace := envOrDefault("AZURE_ATELET_KSA_NAMESPACE", "ate-system")
+	ksaName := envOrDefault("AZURE_ATELET_KSA_NAME", "atelet")
+
+	return &AteletWorkloadIdentityEnvironment{
+		ResourceGroup:         os.Getenv("AZURE_RESOURCE_GROUP"),
+		Location:              os.Getenv("AZURE_LOCATION"),
+		ClusterName:           os.Getenv("AKS_CLUSTER_NAME"),
+		IdentityResourceGroup: envOrDefault("AZURE_ATELET_IDENTITY_RESOURCE_GROUP", os.Getenv("AZURE_RESOURCE_GROUP")),
+		IdentityName:          envOrDefault("AZURE_ATELET_IDENTITY_NAME", "atelet"),
+		KSANamespace:          ksaNamespace,
+		KSAName:               ksaName,
+		FederatedCredName:     envOrDefault("AZURE_ATELET_FEDERATED_CREDENTIAL_NAME", ksaNamespace+"-"+ksaName),
+	}, nil
+}
+
+func requireAteletPermissionsEnv() (*AteletPermissionsEnvironment, error) {
+	identityEnv, err := requireAteletWorkloadIdentityEnv()
+	if err != nil {
+		return nil, err
+	}
+
+	requiredEnvVars := []string{
+		"AZURE_STORAGE_ACCOUNT_NAME",
+		"AZURE_CONTAINER_REGISTRY_NAME",
+	}
+
+	missing := []string{}
+	for _, key := range requiredEnvVars {
+		if os.Getenv(key) == "" {
+			missing = append(missing, key)
+		}
+	}
+	if len(missing) > 0 {
+		return nil, fmt.Errorf("missing required environment variables for atelet permission setup: %s", strings.Join(missing, ", "))
 	}
 
 	accountName := os.Getenv("AZURE_STORAGE_ACCOUNT_NAME")
@@ -193,20 +234,12 @@ func requireStorageRoleAssignmentsEnv() (*StorageRoleAssignmentsEnvironment, err
 		return nil, fmt.Errorf("AZURE_STORAGE_CONTAINER_NAME must be 3-63 characters using lowercase letters, numbers, and single dashes; dashes must be between letters or numbers")
 	}
 
-	ksaNamespace := envOrDefault("AZURE_ATELET_KSA_NAMESPACE", "ate-system")
-	ksaName := envOrDefault("AZURE_ATELET_KSA_NAME", "atelet")
-
-	return &StorageRoleAssignmentsEnvironment{
-		ResourceGroup:         os.Getenv("AZURE_RESOURCE_GROUP"),
-		Location:              os.Getenv("AZURE_LOCATION"),
-		ClusterName:           os.Getenv("AKS_CLUSTER_NAME"),
-		StorageAccountName:    accountName,
-		StorageContainerName:  containerName,
-		IdentityResourceGroup: envOrDefault("AZURE_ATELET_IDENTITY_RESOURCE_GROUP", os.Getenv("AZURE_RESOURCE_GROUP")),
-		IdentityName:          envOrDefault("AZURE_ATELET_IDENTITY_NAME", "atelet"),
-		KSANamespace:          ksaNamespace,
-		KSAName:               ksaName,
-		FederatedCredName:     envOrDefault("AZURE_ATELET_FEDERATED_CREDENTIAL_NAME", ksaNamespace+"-"+ksaName),
+	return &AteletPermissionsEnvironment{
+		AteletWorkloadIdentityEnvironment: *identityEnv,
+		StorageAccountName:                accountName,
+		StorageContainerName:              containerName,
+		ContainerRegistryName:             os.Getenv("AZURE_CONTAINER_REGISTRY_NAME"),
+		ContainerRegistryResourceGroup:    envOrDefault("AZURE_CONTAINER_REGISTRY_RESOURCE_GROUP", os.Getenv("AZURE_RESOURCE_GROUP")),
 	}, nil
 }
 
