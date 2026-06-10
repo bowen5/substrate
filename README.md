@@ -184,28 +184,15 @@ Similarly, you can deploy or cleanup specific Agent Substrate components using t
    export AZURE_SUBSCRIPTION_ID=$(az account show --query id -o tsv)
    ```
 
-2. Configure the Azure environment:
+2. Create and configure your Azure environment file:
    ```bash
-   export AZURE_RESOURCE_GROUP=substrate-dev
-   export AZURE_LOCATION=eastus
-   export AKS_CLUSTER_NAME=substrate-poc
+   cp hack/ate-azure-dev-env.sh.example .ate-dev-env.sh
 
-   # Globally unique, 3-24 chars, lowercase letters/numbers only.
-   export AZURE_STORAGE_ACCOUNT_NAME=<unique_storage_account_name>
-   export AZURE_STORAGE_CONTAINER_NAME=ate-snapshots
-
-   # Existing or separately-created Azure Container Registry used for ko images.
-   export AZURE_CONTAINER_REGISTRY_NAME=<acr_name>
-   export AZURE_CONTAINER_REGISTRY_RESOURCE_GROUP=${AZURE_RESOURCE_GROUP}
+   # Edit .ate-dev-env.sh to match your subscription/resource names, then source it:
+   source .ate-dev-env.sh
    ```
 
-   Optional AKS defaults can be overridden:
-   ```bash
-   export AKS_KUBERNETES_VERSION=1.34.8
-   export AKS_NODE_VM_SIZE=Standard_D4ads_v5
-   export AKS_NODE_COUNT=2
-   export AKS_NODE_POOL_NAME=substrate
-   ```
+   At minimum, customize the globally unique storage account name and the Azure Container Registry name before provisioning.
 
 3. If needed, create an Azure Container Registry before granting pull permissions:
    ```bash
