@@ -223,7 +223,7 @@ Similarly, you can deploy or cleanup specific Agent Substrate components using t
 
 6. Deploy the Agent Substrate system using the AKS overlay:
    ```bash
-   export ATE_INSTALL_PLATFORM=aks
+   export ATE_INSTALL_AKS=true
    ./hack/install-ate.sh --deploy-ate-system
    ```
 

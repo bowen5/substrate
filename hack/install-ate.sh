@@ -116,11 +116,19 @@ run_ko() {
 }
 
 install_platform() {
+  if [[ "${ATE_INSTALL_KIND:-false}" == "true" && "${ATE_INSTALL_AKS:-false}" == "true" ]]; then
+    echo "ATE_INSTALL_KIND and ATE_INSTALL_AKS cannot both be true" >&2
+    return 1
+  fi
   if [[ "${ATE_INSTALL_KIND:-false}" == "true" ]]; then
     echo "kind"
     return
   fi
-  echo "${ATE_INSTALL_PLATFORM:-base}"
+  if [[ "${ATE_INSTALL_AKS:-false}" == "true" ]]; then
+    echo "aks"
+    return
+  fi
+  echo "base"
 }
 
 require_aks_manifest_env() {
@@ -152,7 +160,7 @@ render_install_kustomize() {
       return 1
       ;;
     *)
-      echo "Unsupported ATE_INSTALL_PLATFORM=${platform}" >&2
+      echo "Unsupported install platform ${platform}" >&2
       return 1
       ;;
   esac
@@ -174,7 +182,7 @@ render_atelet_kustomize() {
       return 1
       ;;
     *)
-      echo "Unsupported ATE_INSTALL_PLATFORM=${platform}" >&2
+      echo "Unsupported install platform ${platform}" >&2
       return 1
       ;;
   esac
