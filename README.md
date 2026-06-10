@@ -173,6 +173,63 @@ Similarly, you can deploy or cleanup specific Agent Substrate components using t
 ./hack/install-ate-kind.sh --delete-all
 ```
 
+### AKS Provisioning (Development, experimental)
+
+`tools/setup-azure` provisions the Azure infrastructure prerequisites for running Agent Substrate on AKS. It is intentionally limited to Azure resource setup; deploying the ATE system on AKS still requires the Azure runtime/storage wiring to be completed.
+
+1. Sign in to Azure and select the target subscription:
+   ```bash
+   az login
+   az account set --subscription <subscription-id>
+   export AZURE_SUBSCRIPTION_ID=$(az account show --query id -o tsv)
+   ```
+
+2. Configure the Azure environment:
+   ```bash
+   export AZURE_RESOURCE_GROUP=substrate-dev
+   export AZURE_LOCATION=eastus
+   export AKS_CLUSTER_NAME=substrate-poc
+
+   # Globally unique, 3-24 chars, lowercase letters/numbers only.
+   export AZURE_STORAGE_ACCOUNT_NAME=<unique_storage_account_name>
+   export AZURE_STORAGE_CONTAINER_NAME=ate-snapshots
+
+   # Existing or separately-created Azure Container Registry used for ko images.
+   export AZURE_CONTAINER_REGISTRY_NAME=<acr_name>
+   export AZURE_CONTAINER_REGISTRY_RESOURCE_GROUP=${AZURE_RESOURCE_GROUP}
+   ```
+
+   Optional AKS defaults can be overridden:
+   ```bash
+   export AKS_KUBERNETES_VERSION=1.34.8
+   export AKS_NODE_VM_SIZE=Standard_D4ads_v5
+   export AKS_NODE_COUNT=2
+   export AKS_NODE_POOL_NAME=substrate
+   ```
+
+3. If needed, create an Azure Container Registry before granting pull permissions:
+   ```bash
+   az acr create \
+     --resource-group ${AZURE_CONTAINER_REGISTRY_RESOURCE_GROUP} \
+     --name ${AZURE_CONTAINER_REGISTRY_NAME} \
+     --sku Basic
+   ```
+
+4. Provision Azure resources:
+   ```bash
+   go run ./tools/setup-azure --all
+   ```
+
+   This registers Azure resource providers, creates the AKS cluster, creates snapshot storage, configures the `atelet` workload identity, grants the AKS kubelet identity `AcrPull` on ACR, and grants `atelet` snapshot-storage and ACR permissions.
+
+5. Authenticate local image pushes to ACR and configure `ko`:
+   ```bash
+   az acr login --name ${AZURE_CONTAINER_REGISTRY_NAME}
+   export KO_DOCKER_REPO=${AZURE_CONTAINER_REGISTRY_NAME}.azurecr.io/ate-images
+   ```
+
+> Note: the Azure provisioning path currently does not create monitoring dashboards, and the runtime deployment still needs Azure-specific storage/backend and manifest wiring before it is equivalent to the GKE path.
+
 #### Tearing down resources (GCP)
 
 If you need to delete the resources created by the setup script, you can use the provided script `hack/teardown.sh`. This script will delete resources in the reverse order of creation and handles partial failures gracefully.
@@ -218,4 +275,5 @@ We provide several sample applications demonstrating Agent Substrate's capabilit
   will eventually ship in upstream Kubernetes (with different names).
 * `cmd/kubectl-ate`: A CLI tool for managing Agent Substrate resources. See its [README](cmd/kubectl-ate/README.md).
 * `tools/setup-gcp`: A provisioning utility to set up the necessary GCP infrastructure resources (GKE, GCS, IAM).
+* `tools/setup-azure`: A provisioning utility to set up Azure infrastructure resources for AKS development (resource providers, AKS, Blob snapshot storage, workload identity, and ACR permissions).
 * `demos/`: Sample applications demonstrating Agent Substrate capabilities.
