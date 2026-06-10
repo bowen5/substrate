@@ -76,6 +76,7 @@ function usage() {
   echo "  --create-session-id-ca-pool-secret     Create session ID CA pool secret"
   echo "  --create-podcertificate-controller-cas Create podcertificate controller CAs"
   echo "  --create-valkey-ca-certs-secret        Create Valkey CA certs secret"
+  echo "  --create-workerpool-ca-certs-secret    Create workerpool CA certs secret for AKS dev installs"
   echo "  --create-api-server-env-vars           Create ate-api-server env vars"
   echo ""
   for demo_name in "${ATE_DEMOS[@]}"; do
@@ -207,6 +208,22 @@ create_valkey_ca_certs_secret() {
     | run_kubectl apply -f -
 }
 
+create_workerpool_ca_certs_secret() {
+  log_step "create_workerpool_ca_certs_secret"
+  local ca_certs=""
+  local pool_json=""
+  pool_json=$(run_kubectl get secret -n podcertificate-controller-system pod-identity-ca-pool -o jsonpath='{.data.pool}' | base64 --decode)
+  local der_base64=""
+  der_base64=$(echo "${pool_json}" | grep -o '"RootCertificateDER":"[^"]*' | sed 's/"RootCertificateDER":"//')
+  ca_certs=$(echo "${der_base64}" | base64 --decode | openssl x509 -inform der -outform pem)
+
+  run_kubectl create secret generic workerpool-ca-certs \
+    --from-literal=trust-bundle.pem="${ca_certs}" \
+    -n ate-system \
+    --dry-run=client -o yaml \
+    | run_kubectl apply -f -
+}
+
 create_jwt_authority_pool_secret() {
   log_step "create_jwt_authority_pool_secret"
   run_kubectl_ate admin make-jwt-pool \
@@ -300,14 +317,20 @@ deploy_ate_system() {
   run_ko apply -f manifests/ate-install/pod-certificate-controller.yaml
   run_kubectl rollout status deployment/podcertificate-controller -n podcertificate-controller-system --timeout=120s
 
-  # Wait for both ClusterTrustBundles to be created by the controller
-  echo "Waiting for podcertificate ClusterTrustBundles to be ready..."
-  until run_kubectl get clustertrustbundles podidentity.podcert.ate.dev:identity:primary-bundle >/dev/null 2>&1; do
-    sleep 1
-  done
-  until run_kubectl get clustertrustbundles servicedns.podcert.ate.dev:identity:primary-bundle >/dev/null 2>&1; do
-    sleep 1
-  done
+  # Wait for both ClusterTrustBundles to be created by the controller, except on
+  # AKS where ClusterTrustBundle is not exposed and the AKS overlay mounts a
+  # static workerpool-ca-certs Secret instead.
+  if [[ "$(install_platform)" == "aks" ]]; then
+    echo "Skipping ClusterTrustBundle wait on AKS; AKS overlay uses workerpool-ca-certs Secret instead."
+  else
+    echo "Waiting for podcertificate ClusterTrustBundles to be ready..."
+    until run_kubectl get clustertrustbundles podidentity.podcert.ate.dev:identity:primary-bundle >/dev/null 2>&1; do
+      sleep 1
+    done
+    until run_kubectl get clustertrustbundles servicedns.podcert.ate.dev:identity:primary-bundle >/dev/null 2>&1; do
+      sleep 1
+    done
+  fi
 
   local manifests=""
   if [[ "$(install_platform)" == "base" ]]; then
@@ -338,6 +361,10 @@ ensure_apiserver_prerequisites() {
     || create_podcertificate_controller_cas
   run_kubectl get secret -n ate-system valkey-ca-certs >/dev/null 2>&1 \
     || create_valkey_ca_certs_secret
+  if [[ "$(install_platform)" == "aks" ]]; then
+    run_kubectl get secret -n ate-system workerpool-ca-certs >/dev/null 2>&1 \
+      || create_workerpool_ca_certs_secret
+  fi
   run_kubectl get configmap -n ate-system ate-api-server-envvars >/dev/null 2>&1 \
     || create_api_server_env_vars
 }
@@ -460,6 +487,7 @@ while [[ "$#" -gt 0 ]]; do
     --create-session-id-ca-pool-secret) create_session_id_ca_pool_secret ;;
     --create-podcertificate-controller-cas) create_podcertificate_controller_cas ;;
     --create-valkey-ca-certs-secret) create_valkey_ca_certs_secret ;;
+    --create-workerpool-ca-certs-secret) create_workerpool_ca_certs_secret ;;
     --create-api-server-env-vars) create_api_server_env_vars ;;
 
     *)

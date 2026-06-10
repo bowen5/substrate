@@ -229,6 +229,8 @@ Similarly, you can deploy or cleanup specific Agent Substrate components using t
 
    The AKS overlay configures `atelet` to use Azure Workload Identity, Azure Blob snapshot storage (`ATE_STORAGE_BACKEND=azure`), and Azure ACR image-pull auth (`--azure-auth-for-image-pulls=true`). The control-plane store still uses the in-cluster Valkey deployment.
 
+   AKS development installs do not use `ClusterTrustBundle`, because tested AKS clusters may expose `podCertificate` projection without exposing the `ClusterTrustBundle` API. Instead, `hack/install-ate.sh` creates an `ate-system/workerpool-ca-certs` Secret from the `pod-identity-ca-pool`, and the AKS overlay mounts that Secret where the base manifest mounts a `ClusterTrustBundle`. This is a static dev-bootstrap workaround, not production trust-bundle rotation.
+
 7. Deploy a demo with an Azure Blob snapshot location:
    ```bash
    export SNAPSHOT_LOCATION=azblob://${AZURE_STORAGE_CONTAINER_NAME}/ate-demo-counter/
