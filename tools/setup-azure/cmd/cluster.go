@@ -104,9 +104,10 @@ func createClusterInternal(ctx context.Context, client *armcontainerservice.Mana
 				},
 			},
 			NetworkProfile: &armcontainerservice.NetworkProfile{
-				NetworkPlugin:   to.Ptr(armcontainerservice.NetworkPluginAzure),
-				LoadBalancerSKU: to.Ptr(armcontainerservice.LoadBalancerSKUStandard),
-				OutboundType:    to.Ptr(armcontainerservice.OutboundTypeLoadBalancer),
+				NetworkPlugin:     to.Ptr(armcontainerservice.NetworkPluginAzure),
+				NetworkPluginMode: to.Ptr(armcontainerservice.NetworkPluginModeOverlay),
+				LoadBalancerSKU:   to.Ptr(armcontainerservice.LoadBalancerSKUStandard),
+				OutboundType:      to.Ptr(armcontainerservice.OutboundTypeLoadBalancer),
 			},
 			OidcIssuerProfile: &armcontainerservice.ManagedClusterOIDCIssuerProfile{
 				Enabled: to.Ptr(true),
