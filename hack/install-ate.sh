@@ -396,6 +396,11 @@ deploy_ate_system() {
     # Build everything resolved with the selected platform Kustomize overlay.
     manifests=$(render_install_kustomize | run_ko resolve -f -)
   fi
+  if [[ "$(install_platform)" == "aks" ]]; then
+    # The Valkey init Job embeds its pod template, which is immutable. AKS dev
+    # overlays patch its volumes, so recreate the Job before applying.
+    run_kubectl delete job -n ate-system valkey-cluster-init --ignore-not-found
+  fi
   echo "${manifests}" | run_kubectl apply -f -
 
   log_step "Waiting for ATE system components to be ready..."
