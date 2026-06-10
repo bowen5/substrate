@@ -62,7 +62,6 @@ func requireClusterEnv() (*ClusterEnvironment, error) {
 		"AZURE_RESOURCE_GROUP",
 		"AZURE_LOCATION",
 		"AKS_CLUSTER_NAME",
-		"AKS_NODE_VM_SIZE",
 	}
 
 	missing := []string{}
@@ -90,7 +89,7 @@ func requireClusterEnv() (*ClusterEnvironment, error) {
 		KubernetesVersion: os.Getenv("AKS_KUBERNETES_VERSION"),
 		NodePoolName:      envOrDefault("AKS_NODE_POOL_NAME", "substrate"),
 		NodeCount:         nodeCount,
-		NodeVMSize:        os.Getenv("AKS_NODE_VM_SIZE"),
+		NodeVMSize:        envOrDefault("AKS_NODE_VM_SIZE", "Standard_D4ads_v5"),
 		DNSPrefix:         dnsPrefix,
 		VnetSubnetID:      os.Getenv("AKS_VNET_SUBNET_ID"),
 	}, nil
