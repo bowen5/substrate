@@ -163,8 +163,10 @@ func (s *ExtProcServer) handleRequestHeaders(
 
 	slog.InfoContext(ctx, "Route ok", slog.String("actorID", actorID), slog.String("targetAddr", targetAddr))
 
-	// Route by rewriting the :authority header.
+	// Route by rewriting the :authority header for Envoy's dynamic forward proxy,
+	// but keep the original host available for upstream host restoration.
 	mutation := &extprocv3.HeaderMutation{}
+	addOriginalHostMutation(metadata.host, mutation)
 	addAuthorityMutation(targetAddr, mutation)
 
 	return &extprocv3.HeadersResponse{

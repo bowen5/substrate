@@ -21,6 +21,8 @@ import (
 	envoy_type "github.com/envoyproxy/go-control-plane/envoy/type/v3"
 )
 
+const originalHostHeader = "x-ate-original-host"
+
 // reqError carries an HTTP-mappable status code and a client-safe message.
 // The underlying cause (if any) is preserved via Unwrap so logs can inspect
 // the full chain without leaking server-side detail into the response body.
@@ -39,6 +41,17 @@ func addAuthorityMutation(auth string, mut *extprocv3.HeaderMutation) {
 			Header: &corev3.HeaderValue{
 				Key:      ":authority",
 				RawValue: []byte(auth),
+			},
+		},
+	)
+}
+
+func addOriginalHostMutation(host string, mut *extprocv3.HeaderMutation) {
+	mut.SetHeaders = append(mut.SetHeaders,
+		&corev3.HeaderValueOption{
+			Header: &corev3.HeaderValue{
+				Key:      originalHostHeader,
+				RawValue: []byte(host),
 			},
 		},
 	)

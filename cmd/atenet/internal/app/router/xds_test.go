@@ -116,6 +116,11 @@ func TestXdsServer_UpdateSnapshot(t *testing.T) {
 		if fallbackRoute.GetMatch().GetPrefix() != "/" {
 			t.Errorf("Expected path mapping prefix '/', got '%s'", fallbackRoute.GetMatch().GetPrefix())
 		}
+
+		routeAction := fallbackRoute.GetRoute()
+		if routeAction.GetHostRewriteHeader() != originalHostHeader {
+			t.Errorf("Expected host rewrite header %q, got %q", originalHostHeader, routeAction.GetHostRewriteHeader())
+		}
 	}
 
 	// Verify listeners generated

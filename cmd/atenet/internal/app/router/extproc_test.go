@@ -179,17 +179,21 @@ func TestExtProcHeadersEvaluation(t *testing.T) {
 			}
 
 			mutation := res.Response.GetHeaderMutation()
-			if len(mutation.GetSetHeaders()) != 1 {
-				t.Fatalf("expected exactly one Header option set, found: %v", mutation.GetSetHeaders())
+			if len(mutation.GetSetHeaders()) != 2 {
+				t.Fatalf("expected exactly two Header options set, found: %v", mutation.GetSetHeaders())
 			}
 
-			headerOption := mutation.GetSetHeaders()[0]
-			if strings.ToLower(headerOption.Header.Key) != ":authority" {
-				t.Errorf("invalid resulting dynamic parameter key: %s", headerOption.Header.Key)
+			mutatedHeaders := make(map[string]string)
+			for _, headerOption := range mutation.GetSetHeaders() {
+				mutatedHeaders[strings.ToLower(headerOption.Header.Key)] = string(headerOption.Header.RawValue)
 			}
 
-			if string(headerOption.Header.RawValue) != tc.expectedTarget {
-				t.Errorf("invalid destination mapping found: %s, expected: %s", headerOption.Header.RawValue, tc.expectedTarget)
+			if mutatedHeaders[":authority"] != tc.expectedTarget {
+				t.Errorf("invalid destination mapping found: %s, expected: %s", mutatedHeaders[":authority"], tc.expectedTarget)
+			}
+
+			if mutatedHeaders[originalHostHeader] != tc.authority {
+				t.Errorf("original host header = %s, expected: %s", mutatedHeaders[originalHostHeader], tc.authority)
 			}
 
 			// Confirm that query logs recorded metric trace details
