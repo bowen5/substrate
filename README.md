@@ -221,7 +221,20 @@ Similarly, you can deploy or cleanup specific Agent Substrate components using t
    export KO_DOCKER_REPO=${AZURE_CONTAINER_REGISTRY_NAME}.azurecr.io/ate-images
    ```
 
-6. Deploy the Agent Substrate system using the AKS overlay:
+6. Fetch AKS credentials and pin the kubectl context:
+   ```bash
+   az aks get-credentials \
+     --resource-group ${AZURE_RESOURCE_GROUP} \
+     --name ${AKS_CLUSTER_NAME} \
+     --overwrite-existing
+
+   export KUBECTL_CONTEXT=$(kubectl config current-context)
+   kubectl --context=${KUBECTL_CONTEXT} get nodes
+   ```
+
+   `tools/setup-azure` provisions the AKS cluster but does not update your local kubeconfig. `hack/install-ate.sh` uses `KUBECTL_CONTEXT` when set; otherwise it uses the current kubeconfig context. Setting `KUBECTL_CONTEXT` here prevents accidentally deploying to another cluster.
+
+7. Deploy the Agent Substrate system using the AKS overlay:
    ```bash
    export ATE_INSTALL_AKS=true
    ./hack/install-ate.sh --deploy-ate-system
@@ -231,7 +244,7 @@ Similarly, you can deploy or cleanup specific Agent Substrate components using t
 
    AKS development installs do not use Kubernetes `podCertificate` or `ClusterTrustBundle`, because tested AKS clusters exposed neither the backing `podcertificaterequests` resource nor the `ClusterTrustBundle` API needed by the base manifests. Instead, `hack/install-ate.sh` creates static dev Secrets from the generated CA pools: `ate-system/servicedns-credential-bundle` for service TLS credentials and `ate-system/workerpool-ca-certs` for workerpool trust. The AKS overlay mounts those Secrets where the base manifest uses projected certificate APIs. This is a static dev-bootstrap workaround, not production identity or trust-bundle rotation.
 
-7. Deploy a demo with an Azure Blob snapshot root:
+8. Deploy a demo with an Azure Blob snapshot root:
    ```bash
    export ATE_DEMO_SNAPSHOT_ROOT=azblob://${AZURE_STORAGE_CONTAINER_NAME}
    ./hack/install-ate.sh --deploy-demo-counter
