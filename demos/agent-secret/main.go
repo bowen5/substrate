@@ -61,20 +61,15 @@ func handleRequest(w http.ResponseWriter, r *http.Request) {
 
 	// 1. Identify Actor (Robust extraction)
 	// New architecture uses Host: <actor-id>.actors.resources.substrate.k8s.io
-	actorID := r.Header.Get("X-AgentSet-Session")
-	if actorID == "" {
-		actorID = r.Header.Get("x-agentset-session")
+	host := r.Host
+	if host == "" {
+		host = r.Header.Get("Host")
 	}
-	if actorID == "" {
-		host := r.Host
-		if host == "" {
-			host = r.Header.Get("Host")
-		}
-		// Extract prefix from <id>.actors.resources.substrate.k8s.io
-		parts := strings.Split(host, ".")
-		if len(parts) > 1 {
-			actorID = parts[0]
-		}
+	// Extract prefix from <id>.actors.resources.substrate.k8s.io
+	parts := strings.Split(host, ".")
+	var actorID string
+	if len(parts) > 1 {
+		actorID = parts[0]
 	}
 
 	if actorID == "" {
