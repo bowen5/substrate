@@ -19,6 +19,7 @@ import (
 	"fmt"
 	"log/slog"
 	"strings"
+	"time"
 
 	"github.com/Azure/azure-sdk-for-go/sdk/azcore/to"
 	"github.com/Azure/azure-sdk-for-go/sdk/azidentity"
@@ -32,6 +33,10 @@ import (
 const (
 	azureADTokenExchangeAudience     = "api://AzureADTokenExchange"
 	storageBlobDataContributorRoleID = "ba92f5b4-2d11-453d-a403-e96b0029c9fe"
+
+	roleAssignmentMaxAttempts = 8
+	roleAssignmentRetryDelay  = 5 * time.Second
+	roleAssignmentMaxDelay    = 30 * time.Second
 )
 
 func createAteletWorkloadIdentity(ctx context.Context, env *Environment) error {
@@ -270,16 +275,7 @@ func createRoleAssignmentIdempotent(ctx context.Context, client *armauthorizatio
 		}
 
 		slog.Info("Role assignment does not exist. Creating...", slog.String("label", label), slog.String("scope", scope), slog.String("principalID", principalID))
-		_, err = client.Create(ctx, scope, assignmentName, armauthorization.RoleAssignmentCreateParameters{
-			Properties: &armauthorization.RoleAssignmentProperties{
-				PrincipalID:      to.Ptr(principalID),
-				RoleDefinitionID: to.Ptr(roleDefinitionID),
-			},
-		}, nil)
-		if err != nil {
-			return fmt.Errorf("create role assignment %s: %w", assignmentName, err)
-		}
-		return nil
+		return createRoleAssignmentWithPrincipalPropagationRetry(ctx, client, scope, assignmentName, roleDefinitionID, principalID, label)
 	}
 
 	props := resp.RoleAssignment.Properties
@@ -295,6 +291,44 @@ func createRoleAssignmentIdempotent(ctx context.Context, client *armauthorizatio
 
 	slog.Info("Role assignment already exists", slog.String("label", label), slog.String("scope", scope), slog.String("roleAssignment", assignmentName))
 	return nil
+}
+
+func createRoleAssignmentWithPrincipalPropagationRetry(ctx context.Context, client *armauthorization.RoleAssignmentsClient, scope, assignmentName, roleDefinitionID, principalID, label string) error {
+	delay := roleAssignmentRetryDelay
+	for attempt := 1; attempt <= roleAssignmentMaxAttempts; attempt++ {
+		_, err := client.Create(ctx, scope, assignmentName, armauthorization.RoleAssignmentCreateParameters{
+			Properties: &armauthorization.RoleAssignmentProperties{
+				PrincipalID:      to.Ptr(principalID),
+				PrincipalType:    to.Ptr(armauthorization.PrincipalTypeServicePrincipal),
+				RoleDefinitionID: to.Ptr(roleDefinitionID),
+			},
+		}, nil)
+		if err == nil {
+			return nil
+		}
+		if !isAzureErrorCode(err, "PrincipalNotFound") || attempt == roleAssignmentMaxAttempts {
+			return fmt.Errorf("create role assignment %s: %w", assignmentName, err)
+		}
+
+		slog.Info("Role assignment principal is not visible to Azure RBAC yet; retrying...",
+			slog.String("label", label),
+			slog.String("scope", scope),
+			slog.String("principalID", principalID),
+			slog.Int("attempt", attempt),
+			slog.Duration("delay", delay))
+		select {
+		case <-ctx.Done():
+			return fmt.Errorf("wait for role assignment principal propagation: %w", ctx.Err())
+		case <-time.After(delay):
+		}
+		if delay < roleAssignmentMaxDelay {
+			delay *= 2
+			if delay > roleAssignmentMaxDelay {
+				delay = roleAssignmentMaxDelay
+			}
+		}
+	}
+	return fmt.Errorf("create role assignment %s: exceeded retry attempts", assignmentName)
 }
 
 func snapshotContainerScope(subscriptionID string, env *AteletPermissionsEnvironment) string {

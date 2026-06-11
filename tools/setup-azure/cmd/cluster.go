@@ -192,3 +192,11 @@ func isNotFound(err error) bool {
 	}
 	return false
 }
+
+func isAzureErrorCode(err error, code string) bool {
+	var responseErr *azcore.ResponseError
+	if errors.As(err, &responseErr) {
+		return strings.EqualFold(responseErr.ErrorCode, code)
+	}
+	return false
+}
