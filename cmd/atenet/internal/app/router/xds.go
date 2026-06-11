@@ -286,9 +286,6 @@ func (x *XdsServer) buildRoutes() *routev3.RouteConfiguration {
 								ClusterSpecifier: &routev3.RouteAction_Cluster{
 									Cluster: "dynamic_forward_proxy_cluster",
 								},
-								HostRewriteSpecifier: &routev3.RouteAction_HostRewriteHeader{
-									HostRewriteHeader: originalHostHeader,
-								},
 								Timeout: durationpb.New(10 * time.Second),
 							},
 						},
