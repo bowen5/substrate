@@ -90,7 +90,7 @@ spec:
     namespace: claude-multiplex-demo
     name: claude-workerpool
   snapshotsConfig:
-    location: gs://${BUCKET_NAME}/claude-multiplex-demo/
+    location: ${ATE_DEMO_SNAPSHOT_ROOT}/claude-multiplex-demo/
 
 ---
 
@@ -127,7 +127,7 @@ spec:
     namespace: claude-multiplex-demo
     name: claude-workerpool
   snapshotsConfig:
-    location: gs://${BUCKET_NAME}/claude-multiplex-demo/
+    location: ${ATE_DEMO_SNAPSHOT_ROOT}/claude-multiplex-demo/
 
 ---
 
@@ -164,4 +164,4 @@ spec:
     namespace: claude-multiplex-demo
     name: claude-workerpool
   snapshotsConfig:
-    location: gs://${BUCKET_NAME}/claude-multiplex-demo/
+    location: ${ATE_DEMO_SNAPSHOT_ROOT}/claude-multiplex-demo/

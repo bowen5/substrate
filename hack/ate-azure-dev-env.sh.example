@@ -58,8 +58,9 @@ export AZURE_ATELET_FEDERATED_CREDENTIAL_NAME=${AZURE_ATELET_KSA_NAMESPACE}-${AZ
 # Select the AKS manifest overlay in hack/install-ate.sh.
 export ATE_INSTALL_AKS=true
 
-# Snapshot location for demo ActorTemplates on Azure Blob.
-export SNAPSHOT_LOCATION=azblob://${AZURE_STORAGE_CONTAINER_NAME}/ate-demo-counter/
+# Snapshot root for demo ActorTemplates on Azure Blob.
+# Individual demo installers append their own stable demo prefix.
+export ATE_DEMO_SNAPSHOT_ROOT=azblob://${AZURE_STORAGE_CONTAINER_NAME}
 
 # ko image destination for AKS/ACR.
 export KO_DOCKER_REPO=${AZURE_CONTAINER_REGISTRY_NAME}.azurecr.io/ate-images

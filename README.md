@@ -199,7 +199,7 @@ Similarly, you can deploy or cleanup specific Agent Substrate components using t
    az acr create \
      --resource-group ${AZURE_CONTAINER_REGISTRY_RESOURCE_GROUP} \
      --name ${AZURE_CONTAINER_REGISTRY_NAME} \
-     --sku Basic
+     --sku Standard
    ```
 
 4. Provision Azure resources:
@@ -231,11 +231,13 @@ Similarly, you can deploy or cleanup specific Agent Substrate components using t
 
    AKS development installs do not use Kubernetes `podCertificate` or `ClusterTrustBundle`, because tested AKS clusters exposed neither the backing `podcertificaterequests` resource nor the `ClusterTrustBundle` API needed by the base manifests. Instead, `hack/install-ate.sh` creates static dev Secrets from the generated CA pools: `ate-system/servicedns-credential-bundle` for service TLS credentials and `ate-system/workerpool-ca-certs` for workerpool trust. The AKS overlay mounts those Secrets where the base manifest uses projected certificate APIs. This is a static dev-bootstrap workaround, not production identity or trust-bundle rotation.
 
-7. Deploy a demo with an Azure Blob snapshot location:
+7. Deploy a demo with an Azure Blob snapshot root:
    ```bash
-   export SNAPSHOT_LOCATION=azblob://${AZURE_STORAGE_CONTAINER_NAME}/ate-demo-counter/
+   export ATE_DEMO_SNAPSHOT_ROOT=azblob://${AZURE_STORAGE_CONTAINER_NAME}
    ./hack/install-ate.sh --deploy-demo-counter
    ```
+
+   Demo templates append their own stable folder under `ATE_DEMO_SNAPSHOT_ROOT`; for example, `--deploy-demo-counter` uses `ate-demo-counter/`.
 
 > Note: the Azure provisioning path currently does not create monitoring dashboards. Azure-managed Redis/Azure Cache integration is also intentionally out of scope for this development path; the AKS runtime uses in-cluster Valkey for now.
 

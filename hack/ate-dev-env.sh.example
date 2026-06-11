@@ -34,6 +34,7 @@ export GVISOR_NODE_MACHINE_TYPE=c3-standard-4
 export KUBECTL_CONTEXT=
 
 export BUCKET_NAME=snapshot-substrate-test-${PROJECT_ID}
+export ATE_DEMO_SNAPSHOT_ROOT=gs://${BUCKET_NAME}
 
 export KO_DOCKER_REPO="gcr.io/${PROJECT_ID}/ate-images"
 
