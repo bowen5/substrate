@@ -23,6 +23,8 @@ import (
 	corev3 "github.com/envoyproxy/go-control-plane/envoy/config/core/v3"
 )
 
+const actorIDHeader = "x-substrate-actor-id"
+
 type requestMetadata struct {
 	headers map[string]string
 	path    string
@@ -59,6 +61,16 @@ func newRequestMetadata(headers []*corev3.HeaderValue) *requestMetadata {
 		path:    path,
 		host:    host,
 	}
+}
+
+func (m *requestMetadata) actorID() (string, error) {
+	if actorID := strings.TrimSpace(m.headers[actorIDHeader]); actorID != "" {
+		if err := resources.ValidateActorID(actorID); err != nil {
+			return "", fmt.Errorf("invalid %s: %w", actorIDHeader, err)
+		}
+		return actorID, nil
+	}
+	return parseActorID(m.host)
 }
 
 func parseActorID(host string) (string, error) {

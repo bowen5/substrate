@@ -45,6 +45,7 @@ func TestExtProcHeadersEvaluation(t *testing.T) {
 	tests := []struct {
 		name           string
 		authority      string
+		actorIDHeader  string
 		resumeResp     *ateapipb.ResumeActorResponse
 		resumeErr      error
 		expectErr      bool
@@ -122,6 +123,26 @@ func TestExtProcHeadersEvaluation(t *testing.T) {
 			expectErr:      false,
 			expectedTarget: "10.0.0.52:80",
 		},
+		{
+			name:          "Successful resume from actor id header with IP authority",
+			authority:     "52.228.124.216",
+			actorIDHeader: testUUID,
+			resumeResp: &ateapipb.ResumeActorResponse{
+				Actor: &ateapipb.Actor{
+					AteomPodIp: "10.0.0.52",
+				},
+			},
+			expectErr:      false,
+			expectedTarget: "10.0.0.52:80",
+		},
+		{
+			name:           "Invalid actor id header returns 404",
+			authority:      "52.228.124.216",
+			actorIDHeader:  "Invalid_Bad",
+			expectErr:      true,
+			expectedErrStr: `invalid host "52.228.124.216": invalid x-substrate-actor-id: invalid actor_id: must start and end with a lower case alphanumeric character, and consist only of lower case alphanumeric characters or '-'`,
+			expectedStatus: envoy_type.StatusCode_NotFound,
+		},
 	}
 
 	for _, tc := range tests {
@@ -140,14 +161,16 @@ func TestExtProcHeadersEvaluation(t *testing.T) {
 
 			s := NewExtProcServer(50051, clientMock, nil)
 
+			headers := []*corev3.HeaderValue{
+				{Key: ":path", Value: "/v1/actors/invoke"},
+				{Key: ":authority", Value: tc.authority},
+				{Key: ":method", Value: "POST"},
+			}
+			if tc.actorIDHeader != "" {
+				headers = append(headers, &corev3.HeaderValue{Key: actorIDHeader, Value: tc.actorIDHeader})
+			}
 			reqHeaders := &extprocv3.HttpHeaders{
-				Headers: &corev3.HeaderMap{
-					Headers: []*corev3.HeaderValue{
-						{Key: ":path", Value: "/v1/actors/invoke"},
-						{Key: ":authority", Value: tc.authority},
-						{Key: ":method", Value: "POST"},
-					},
-				},
+				Headers: &corev3.HeaderMap{Headers: headers},
 			}
 
 			res, metadata, target, _, _, err := s.handleRequestHeaders(context.Background(), reqHeaders)

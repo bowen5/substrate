@@ -129,7 +129,7 @@ func (s *ExtProcServer) handleRequestHeaders(
 	metadata := newRequestMetadata(reqHeaders.Headers.GetHeaders())
 	slog.InfoContext(ctx, "Request", slog.String("metadata", metadata.String()))
 
-	actorID, err := parseActorID(metadata.host)
+	actorID, err := metadata.actorID()
 	if err != nil {
 		// Host is invalid, respond with 404.
 		return nil, metadata, "", "", "", invalidHostErr(metadata.host, err)
