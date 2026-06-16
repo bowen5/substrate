@@ -42,23 +42,31 @@ func main() {
 	slog.SetDefault(slog.New(slog.NewJSONHandler(os.Stdout, nil)))
 
 	defaultMux := http.NewServeMux()
-	defaultMux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+	defaultMux.HandleFunc("/readiness", func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	})
+	defaultMux.HandleFunc("/invocations", func(w http.ResponseWriter, r *http.Request) {
 		ctx := r.Context()
 		count := atomic.AddUint64(&requestCount, 1)
 		currentIP := getCurrentIP()
-		response := fmt.Sprintf("hello from: %s | preserved memory count: %d\n", currentIP, count)
+		randomFileHash := hashRandomFile()
+		response := fmt.Sprintf("hello from: %s | preserved memory count: %d | random file hash: %s\n", currentIP, count, randomFileHash)
 		slog.InfoContext(ctx, "Handled request", slog.String("response", response))
 		w.WriteHeader(http.StatusOK)
 		w.Write([]byte(response))
 	})
 
-	go func() {
-		slog.InfoContext(ctx, "Starting counter server on port 80")
-		if err := http.ListenAndServe(":80", defaultMux); err != nil {
-			slog.ErrorContext(ctx, "Error starting server", slog.Any("err", err))
-			os.Exit(1)
-		}
-	}()
+	for _, port := range []string{"80", "8088"} {
+		port := port
+		go func() {
+			addr := ":" + port
+			slog.InfoContext(ctx, "Starting counter server", slog.String("addr", addr))
+			if err := http.ListenAndServe(addr, defaultMux); err != nil {
+				slog.ErrorContext(ctx, "Error starting server", slog.String("addr", addr), slog.Any("err", err))
+				os.Exit(1)
+			}
+		}()
+	}
 
 	// Write some random data to a file in the root filesystem, to test
 	// filesystem checkpoint/restore.
@@ -97,7 +105,7 @@ func writeRandomFile() error {
 func hashRandomFile() string {
 	rfBytes, err := os.ReadFile("/random-content-file")
 	if err != nil {
-		panic(err)
+		return "failed-to-read-random-file"
 	}
 
 	hash := sha256.Sum256(rfBytes)
