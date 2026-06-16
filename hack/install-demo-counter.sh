@@ -32,8 +32,13 @@ demo-counter_cmdline() {
 demo-counter_deploy() {
   log_step "demo-counter_deploy"
   ensure_crds
+  local ko_tags="latest"
+  if [[ -n "${TAG:-}" ]]; then
+    ko_tags="${ko_tags},${TAG}"
+  fi
+
   sed "s|\${ATE_DEMO_SNAPSHOT_ROOT}|${ATE_DEMO_SNAPSHOT_ROOT}|g" demos/counter/counter.yaml.tmpl \
-    | run_ko apply -f -
+    | run_ko apply --tags "${ko_tags}" -f -
 
   # Wait for the demo to be fully ready before returning. On a cold cluster the
   # first ActorTemplate golden snapshot pays one-time costs (downloading the

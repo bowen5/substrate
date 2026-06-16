@@ -19,5 +19,6 @@ defaultPlatforms:
   - linux/arm64
 
 baseImageOverrides:
+  github.com/agent-substrate/substrate/demos/counter: alpine
   github.com/agent-substrate/substrate/demos/sandbox: alpine
   github.com/agent-substrate/substrate/demos/agent-secret: alpine
