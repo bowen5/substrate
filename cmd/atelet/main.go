@@ -33,12 +33,14 @@ import (
 	"github.com/Azure/azure-sdk-for-go/sdk/azidentity"
 	"github.com/Azure/azure-sdk-for-go/sdk/storage/azblob"
 	"github.com/agent-substrate/substrate/cmd/atelet/internal/ategcs"
+	"github.com/agent-substrate/substrate/cmd/atelet/internal/memorypullcache"
 	"github.com/agent-substrate/substrate/internal/ateinterceptors"
 	"github.com/agent-substrate/substrate/internal/ateompath"
 	"github.com/agent-substrate/substrate/internal/azurecontainerauth"
 	"github.com/agent-substrate/substrate/internal/memorypullcache"
 	"github.com/agent-substrate/substrate/internal/proto/ateletpb"
 	"github.com/agent-substrate/substrate/internal/proto/ateompb"
+	"github.com/agent-substrate/substrate/internal/resources"
 	"github.com/agent-substrate/substrate/internal/serverboot"
 	"github.com/agent-substrate/substrate/internal/version"
 	"github.com/aws/aws-sdk-go-v2/config"
@@ -54,8 +56,10 @@ import (
 	"golang.org/x/sync/errgroup"
 	"google.golang.org/api/option"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/reflection"
+	"google.golang.org/grpc/status"
 	"k8s.io/utils/lru"
 )
 
@@ -272,7 +276,12 @@ func (s *AteomHerder) fetchRunsc(ctx context.Context, cfg *ateletpb.RunscConfig)
 		platCfg = cfg.GetArm64()
 	}
 
-	localPath := ateompath.RunSCBinaryPath(platCfg.GetSha256Hash())
+	sha256Hash := platCfg.GetSha256Hash()
+	if err := resources.ValidateRunscHash(sha256Hash); err != nil {
+		return "", status.Error(codes.InvalidArgument, err.Error())
+	}
+
+	localPath := ateompath.RunSCBinaryPath(sha256Hash)
 	_, err := os.Stat(localPath)
 	if err == nil { // EQUALS nil
 		return localPath, nil
@@ -332,6 +341,12 @@ func (s *AteomHerder) fetchRunsc(ctx context.Context, cfg *ateletpb.RunscConfig)
 }
 
 func (s *AteomHerder) Run(ctx context.Context, req *ateletpb.RunRequest) (*ateletpb.RunResponse, error) {
+	if err := validateRunRequest(req); err != nil {
+		// status.Error so the interceptor surfaces InvalidArgument and the
+		// message instead of masking both as Internal.
+		return nil, status.Error(codes.InvalidArgument, err.Error())
+	}
+
 	runscPath, err := s.fetchRunscAndPrep(ctx, req.GetRunsc())
 	if err != nil {
 		return nil, err
@@ -405,6 +420,10 @@ func recordSnapshotSize(ctx context.Context, kind, path, atNamespace, atName str
 }
 
 func (s *AteomHerder) Checkpoint(ctx context.Context, req *ateletpb.CheckpointRequest) (*ateletpb.CheckpointResponse, error) {
+	if err := validateCheckpointRequest(req); err != nil {
+		return nil, status.Error(codes.InvalidArgument, err.Error())
+	}
+
 	runscPath, err := s.fetchRunscAndPrep(ctx, req.GetRunsc())
 	if err != nil {
 		return nil, err
@@ -468,6 +487,10 @@ func (s *AteomHerder) Checkpoint(ctx context.Context, req *ateletpb.CheckpointRe
 }
 
 func (s *AteomHerder) Restore(ctx context.Context, req *ateletpb.RestoreRequest) (*ateletpb.RestoreResponse, error) {
+	if err := validateRestoreRequest(req); err != nil {
+		return nil, status.Error(codes.InvalidArgument, err.Error())
+	}
+
 	runscPath, err := s.fetchRunscAndPrep(ctx, req.GetRunsc())
 	if err != nil {
 		return nil, err
@@ -665,6 +688,54 @@ func (d *AteomDialer) DialAteomPod(ctx context.Context, podUID string) (*grpc.Cl
 	d.conns.Add(key, conn)
 
 	return conn, nil
+}
+
+// validateRunRequest, validateCheckpointRequest, and validateRestoreRequest
+// validate everything in their request that atelet turns into host filesystem
+// paths, plus the request-specific fields. atelet listens on an insecure
+// hostPort, so any reachable caller could otherwise smuggle a path separator
+// or ".." through these fields and make atelet read/RemoveAll/write outside
+// the intended directory tree, or collide bundles. Each RPC validates at its
+// boundary, before any path is built. The field rules live in
+// internal/resources so other components can apply them at their boundaries.
+func validateRunRequest(req *ateletpb.RunRequest) error {
+	return validateActorRequest(req.GetActorTemplateNamespace(), req.GetActorTemplateName(), req.GetActorId(), req.GetTargetAteomUid(), req.GetSpec())
+}
+
+func validateCheckpointRequest(req *ateletpb.CheckpointRequest) error {
+	if err := validateActorRequest(req.GetActorTemplateNamespace(), req.GetActorTemplateName(), req.GetActorId(), req.GetTargetAteomUid(), req.GetSpec()); err != nil {
+		return err
+	}
+	if err := resources.ValidateSnapshotURIPrefix(req.GetSnapshotUriPrefix()); err != nil {
+		return err
+	}
+	return nil
+}
+
+func validateRestoreRequest(req *ateletpb.RestoreRequest) error {
+	if err := validateActorRequest(req.GetActorTemplateNamespace(), req.GetActorTemplateName(), req.GetActorId(), req.GetTargetAteomUid(), req.GetSpec()); err != nil {
+		return err
+	}
+	if err := resources.ValidateSnapshotURIPrefix(req.GetSnapshotUriPrefix()); err != nil {
+		return err
+	}
+	return nil
+}
+
+// validateActorRequest is the shared core for the fields common to all three
+// RPCs.
+func validateActorRequest(namespace, template, actorID, targetAteomUID string, spec *ateletpb.WorkloadSpec) error {
+	if err := resources.ValidateActorRef(namespace, template, actorID); err != nil {
+		return err
+	}
+	if err := resources.ValidateAteomUID(targetAteomUID); err != nil {
+		return err
+	}
+	names := make([]string, 0, len(spec.GetContainers()))
+	for _, ctr := range spec.GetContainers() {
+		names = append(names, ctr.GetName())
+	}
+	return resources.ValidateContainerNames(names)
 }
 
 func resetActorDirs(actorTemplateNamespace, actorTemplateName, actorID string) error {
