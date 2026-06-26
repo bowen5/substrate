@@ -21,6 +21,7 @@ import (
 	"time"
 
 	"github.com/agent-substrate/substrate/cmd/ateapi/internal/store"
+	"github.com/agent-substrate/substrate/cmd/ateapi/internal/workercache"
 	listersv1alpha1 "github.com/agent-substrate/substrate/pkg/client/listers/api/v1alpha1"
 	"github.com/agent-substrate/substrate/pkg/proto/ateapipb"
 	"github.com/google/uuid"
@@ -115,18 +116,32 @@ func runStep[Params any, Context any](ctx context.Context, params Params, wCtx C
 // ActorWorkflow handles the workflows for actor's resume / suspend operations.
 type ActorWorkflow struct {
 	store               store.Interface
+	workerCache         *workercache.Cache
 	dialer              *AteletDialer
 	actorTemplateLister listersv1alpha1.ActorTemplateLister
+	workerPoolLister    listersv1alpha1.WorkerPoolLister
+	sandboxConfigLister listersv1alpha1.SandboxConfigLister
 	kubeClient          kubernetes.Interface
 	secretCache         *envSecretCache
 }
 
 // NewActorWorkflow creates a new ActorWorkflow.
-func NewActorWorkflow(store store.Interface, dialer *AteletDialer, actorTemplateLister listersv1alpha1.ActorTemplateLister, kubeClient kubernetes.Interface) *ActorWorkflow {
+func NewActorWorkflow(
+	store store.Interface,
+	workerCache *workercache.Cache,
+	dialer *AteletDialer,
+	actorTemplateLister listersv1alpha1.ActorTemplateLister,
+	workerPoolLister listersv1alpha1.WorkerPoolLister,
+	sandboxConfigLister listersv1alpha1.SandboxConfigLister,
+	kubeClient kubernetes.Interface,
+) *ActorWorkflow {
 	return &ActorWorkflow{
 		store:               store,
+		workerCache:         workerCache,
 		dialer:              dialer,
 		actorTemplateLister: actorTemplateLister,
+		workerPoolLister:    workerPoolLister,
+		sandboxConfigLister: sandboxConfigLister,
 		kubeClient:          kubeClient,
 		secretCache:         newEnvSecretCache(envSecretCacheTTL),
 	}
@@ -150,8 +165,8 @@ func (w *ActorWorkflow) ResumeActor(ctx context.Context, id string, boot bool) (
 
 	steps := []WorkflowStep[*ResumeInput, *ResumeState]{
 		&LoadActorForResumeStep{store: w.store, actorTemplateLister: w.actorTemplateLister},
-		&AssignWorkerStep{store: w.store},
-		&CallAteletRestoreStep{dialer: w.dialer, kubeClient: w.kubeClient, secretCache: w.secretCache},
+		&AssignWorkerStep{store: w.store, workerCache: w.workerCache, workerPoolLister: w.workerPoolLister},
+		&CallAteletRestoreStep{dialer: w.dialer, kubeClient: w.kubeClient, secretCache: w.secretCache, workerPoolLister: w.workerPoolLister, sandboxConfigLister: w.sandboxConfigLister},
 		&FinalizeRunningStep{store: w.store},
 	}
 
@@ -170,7 +185,7 @@ func (w *ActorWorkflow) SuspendActor(ctx context.Context, id string) (*ateapipb.
 	state := &SuspendState{}
 
 	// Acquire lock and get the timeout context for the workflow
-	// Lock TTL is 7 seconds, with 2 seconds padding for workflow timeout
+	// Lock TTL is 30 seconds, with 2 seconds padding for workflow timeout
 	ctx, releaseLock, err := w.acquireActorLock(ctx, id, 30*time.Second, 2*time.Second)
 	if err != nil {
 		return nil, err
@@ -182,6 +197,35 @@ func (w *ActorWorkflow) SuspendActor(ctx context.Context, id string) (*ateapipb.
 		&MarkSuspendingStep{store: w.store},
 		&CallAteletSuspendStep{dialer: w.dialer},
 		&FinalizeSuspendedStep{store: w.store},
+	}
+
+	if err := RunWorkflow(ctx, input, state, steps); err != nil {
+		return nil, err
+	}
+
+	return state.Actor, nil
+}
+
+// PauseActor executes the workflow to pause a running actor. Idempotent.
+func (w *ActorWorkflow) PauseActor(ctx context.Context, id string) (*ateapipb.Actor, error) {
+	input := &PauseInput{
+		ActorID: id,
+	}
+	state := &PauseState{}
+
+	// Acquire lock and get the timeout context for the workflow
+	// Lock TTL is 30 seconds, with 2 seconds padding for workflow timeout
+	ctx, releaseLock, err := w.acquireActorLock(ctx, id, 30*time.Second, 2*time.Second)
+	if err != nil {
+		return nil, err
+	}
+	defer releaseLock()
+
+	steps := []WorkflowStep[*PauseInput, *PauseState]{
+		&LoadActorForPauseStep{store: w.store, actorTemplateLister: w.actorTemplateLister},
+		&MarkPausingStep{store: w.store},
+		&CallAteletPauseStep{dialer: w.dialer},
+		&FinalizePausedStep{store: w.store},
 	}
 
 	if err := RunWorkflow(ctx, input, state, steps); err != nil {

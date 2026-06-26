@@ -31,10 +31,6 @@ type requestMetadata struct {
 	host    string
 }
 
-func (m *requestMetadata) String() string {
-	return fmt.Sprintf("%+v", *m)
-}
-
 func newRequestMetadata(headers []*corev3.HeaderValue) *requestMetadata {
 	headersMap := make(map[string]string)
 	var path string

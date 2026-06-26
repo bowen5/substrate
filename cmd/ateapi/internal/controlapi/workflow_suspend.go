@@ -116,35 +116,23 @@ func (s *CallAteletSuspendStep) Execute(ctx context.Context, input *SuspendInput
 	}
 	client := ateletpb.NewAteomHerderClient(ateletConn)
 
-	runscCfg := &ateletpb.RunscConfig{}
-	if state.ActorTemplate.Spec.Runsc.AMD64 != nil {
-		runscCfg.Amd64 = &ateletpb.RunscPlatformConfig{
-			Sha256Hash: state.ActorTemplate.Spec.Runsc.AMD64.SHA256Hash,
-			Url:        state.ActorTemplate.Spec.Runsc.AMD64.URL,
-		}
-	}
-	if state.ActorTemplate.Spec.Runsc.ARM64 != nil {
-		runscCfg.Arm64 = &ateletpb.RunscPlatformConfig{
-			Sha256Hash: state.ActorTemplate.Spec.Runsc.ARM64.SHA256Hash,
-			Url:        state.ActorTemplate.Spec.Runsc.ARM64.URL,
-		}
-	}
-	if state.ActorTemplate.Spec.Runsc.Authentication.GCP != nil {
-		authnCfg := &ateletpb.AuthenticationConfig{}
-		authnCfg.Gcp = &ateletpb.GCPAuthenticationConfig{Use: true}
-		runscCfg.Authentication = authnCfg
-	}
-
+	// Checkpoint does not carry the sandbox config: atelet uses the version the
+	// actor is currently running (recorded on-node at Run/Restore) and pins it
+	// into the snapshot manifest.
 	req := &ateletpb.CheckpointRequest{
 		TargetAteomUid:         state.Actor.GetAteomPodUid(),
 		ActorTemplateNamespace: state.Actor.GetActorTemplateNamespace(),
 		ActorTemplateName:      state.Actor.GetActorTemplateName(),
 		ActorId:                state.Actor.GetActorId(),
-		Runsc:                  runscCfg,
 		Spec: &ateletpb.WorkloadSpec{
 			PauseImage: state.ActorTemplate.Spec.PauseImage,
 		},
-		SnapshotUriPrefix: state.Actor.GetInProgressSnapshot(),
+		Type: ateletpb.CheckpointType_CHECKPOINT_TYPE_EXTERNAL,
+		Config: &ateletpb.CheckpointRequest_ExternalConfig{
+			ExternalConfig: &ateletpb.ExternalCheckpointConfiguration{
+				SnapshotUriPrefix: state.Actor.GetInProgressSnapshot(),
+			},
+		},
 	}
 	for _, ctr := range state.ActorTemplate.Spec.Containers {
 		ateletCtr := &ateletpb.Container{
@@ -195,7 +183,7 @@ func (s *FinalizeSuspendedStep) Execute(ctx context.Context, input *SuspendInput
 		workerNs := latestActor.GetAteomPodNamespace()
 		workerPod := latestActor.GetAteomPodName()
 
-		workerPool := state.ActorTemplate.Spec.WorkerPoolRef.Name
+		workerPool := latestActor.GetWorkerPoolName()
 
 		worker, err := s.store.GetWorker(ctx, workerNs, workerPool, workerPod)
 		if err != nil {
@@ -224,12 +212,20 @@ func (s *FinalizeSuspendedStep) Execute(ctx context.Context, input *SuspendInput
 		}
 		latestActor.Status = ateapipb.Actor_STATUS_SUSPENDED
 		if latestActor.InProgressSnapshot != "" {
-			latestActor.LastSnapshot = latestActor.InProgressSnapshot
+			latestActor.LatestSnapshotInfo = &ateapipb.SnapshotInfo{
+				Type: ateapipb.SnapshotType_SNAPSHOT_TYPE_EXTERNAL,
+				Data: &ateapipb.SnapshotInfo_External{
+					External: &ateapipb.ExternalSnapshotInfo{
+						SnapshotUriPrefix: latestActor.InProgressSnapshot,
+					},
+				},
+			}
 			latestActor.InProgressSnapshot = ""
 		}
 		latestActor.AteomPodNamespace = ""
 		latestActor.AteomPodName = ""
 		latestActor.AteomPodIp = ""
+		latestActor.WorkerPoolName = ""
 		err = s.store.UpdateActor(ctx, latestActor, latestActor.GetVersion())
 		if err != nil {
 			return err

@@ -15,7 +15,6 @@
 package v1alpha1
 
 import (
-	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
@@ -158,62 +157,34 @@ type ActorTemplateSpec struct {
 	// +required
 	SnapshotsConfig SnapshotsConfig `json:"snapshotsConfig"`
 
-	// Name of the worker pool to use for the actor.
+	// SandboxClass selects the sandbox runtime family this template's actors run
+	// on. Only worker pools whose SandboxClass matches are eligible. Snapshots are
+	// not portable across classes, so this is a hard gate, AND'd with WorkerSelector
+	// and the actor's worker_selector. Defaults to gvisor.
 	//
-	// +required
-	// TODO: clone this type locally and add validation
-	WorkerPoolRef corev1.ObjectReference `json:"workerPoolRef"`
-
-	// Parameters for fetching the runsc binary to use.
+	// TODO: This is almost certainly insufficient.  We have to decide a number of things:
 	//
-	// +required
-	Runsc RunscConfig `json:"runsc,omitempty"`
-}
-
-type GCPAuthenticationConfig struct {
-}
-
-// Authentication configuration for atelet to download static files.
-//
-// If no members are set, then atelet will use anonymous authentication.
-type AuthenticationConfig struct {
-	// Use GCP application-default credentials.
+	// 1) How does someone discover what classes are available, or what they mean?
+	// 2) How does someone define a new sandbox class?
+	// 3) Does a class mean the specific type of sandbox tech or does it include some aspect of config (e.g. can we have 2 different classes which both use gVisor with different config, or 2 classes which use different microvms)
+	// 4) How does the default get set and who sets it?
+	//
+	// See Also: WorkerPool SandboxClass
+	//
 	//
 	// +optional
-	GCP *GCPAuthenticationConfig `json:"gcp,omitempty"`
-}
+	// +kubebuilder:validation:Enum=gvisor;microvm
+	// +kubebuilder:default=gvisor
+	SandboxClass SandboxClass `json:"sandboxClass,omitempty"`
 
-type RunscPlatformConfig struct {
-	// The SHA256 hash of the binary to download.  Used both to name the
-	// downloaded file (for preventing conflicts), and to check the integrity of
-	// the downloaded file.
-	//
-	// +required
-	// +kubebuilder:validation:Pattern=`^[a-z0-9]+$`
-	SHA256Hash string `json:"sha256Hash,omitempty"`
-
-	// A gs:// URL pointing to a runsc binary that can be downloaded (possibly
-	// with atelet's credentials).
-	//
-	// +required
-	// TODO: add real format checking
-	// +kubebuilder:validation:MinLength=1
-	URL string `json:"url,omitempty"`
-}
-
-type RunscConfig struct {
-	// Configuration for the amd64 binary.
+	// WorkerSelector restricts which worker pools actors from this template may
+	// use. The scheduler only considers pools whose labels match this selector.
+	// If nil, all pools are eligible (subject to the actor's own worker_selector).
+	// Acts as a gate: the actor's worker_selector can only narrow this set further,
+	// never expand it.
 	//
 	// +optional
-	AMD64 *RunscPlatformConfig `json:"amd64,omitempty"`
-
-	// Configuration for the arm64 binary.
-	//
-	// +optional
-	ARM64 *RunscPlatformConfig `json:"arm64,omitempty"`
-
-	// How should atelet authenticate to download the runsc binary?
-	Authentication AuthenticationConfig `json:"authentication,omitempty"`
+	WorkerSelector *metav1.LabelSelector `json:"workerSelector,omitempty"`
 }
 
 // TODO: add validation
@@ -236,12 +207,14 @@ type ActorTemplateStatus struct {
 // +kubebuilder:object:root=true
 // +kubebuilder:resource:scope=Namespaced,shortName=actortemplate
 // +kubebuilder:subresource:status
+// +kubebuilder:printcolumn:name="Class",type=string,JSONPath=`.spec.sandboxClass`
 type ActorTemplate struct {
 	metav1.TypeMeta   `json:",inline"`
 	metav1.ObjectMeta `json:"metadata,omitempty"`
 
-	// spec defines the desired state of ActorTemplate
+	// spec defines the desired state of ActorTemplate. This field is immutable.
 	// +required
+	// +kubebuilder:validation:XValidation:rule="self == oldSelf",message="Spec is immutable"
 	Spec ActorTemplateSpec `json:"spec"`
 
 	// status is the observed state of ActorTemplate

@@ -15,8 +15,15 @@
 package main
 
 import (
+	"bytes"
 	"context"
+	"crypto/sha256"
+	"errors"
+	"fmt"
+	"io"
 	"os"
+	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/agent-substrate/substrate/internal/ateompath"
@@ -24,6 +31,55 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 )
+
+func TestWriteFileAtomic(t *testing.T) {
+	dir := t.TempDir()
+	target := filepath.Join(dir, "actor-id")
+
+	// One shared write over an existing value, as happens on every resume;
+	// each subtest checks one postcondition.
+	if err := os.WriteFile(target, []byte("golden-id"), 0o600); err != nil {
+		t.Fatalf("seeding target: %v", err)
+	}
+	if err := writeFileAtomic(target, []byte("counter-1"), 0o644); err != nil {
+		t.Fatalf("writeFileAtomic: %v", err)
+	}
+
+	t.Run("replaces content", func(t *testing.T) {
+		got, err := os.ReadFile(target)
+		if err != nil {
+			t.Fatalf("reading target: %v", err)
+		}
+		if string(got) != "counter-1" {
+			t.Errorf("content = %q, want %q", got, "counter-1")
+		}
+	})
+
+	t.Run("sets permissions", func(t *testing.T) {
+		info, err := os.Stat(target)
+		if err != nil {
+			t.Fatalf("stat target: %v", err)
+		}
+		if perm := info.Mode().Perm(); perm != 0o644 {
+			t.Errorf("perm = %o, want 644", perm)
+		}
+	})
+
+	t.Run("leaves no temp files", func(t *testing.T) {
+		// The directory is visible inside the actor.
+		entries, err := os.ReadDir(dir)
+		if err != nil {
+			t.Fatalf("reading dir: %v", err)
+		}
+		if len(entries) != 1 {
+			names := make([]string, 0, len(entries))
+			for _, e := range entries {
+				names = append(names, e.Name())
+			}
+			t.Errorf("leftover files in identity dir: %v", names)
+		}
+	})
+}
 
 func TestValidateActorRequest(t *testing.T) {
 	const okNS, okTmpl, okID, okUID = "ate-demo", "counter", "counter-1", "422938ba-8860-4983-a25d-d6bcb0a69d4e"
@@ -70,7 +126,12 @@ func validCheckpointRequest() *ateletpb.CheckpointRequest {
 		ActorId:                "counter-1",
 		TargetAteomUid:         "422938ba-8860-4983-a25d-d6bcb0a69d4e",
 		Spec:                   &ateletpb.WorkloadSpec{Containers: []*ateletpb.Container{{Name: "worker"}}},
-		SnapshotUriPrefix:      "gs://bucket/actors/1/snapshots/2/",
+		Type:                   ateletpb.CheckpointType_CHECKPOINT_TYPE_EXTERNAL,
+		Config: &ateletpb.CheckpointRequest_ExternalConfig{
+			ExternalConfig: &ateletpb.ExternalCheckpointConfiguration{
+				SnapshotUriPrefix: "gs://bucket/actors/1/snapshots/2/",
+			},
+		},
 	}
 }
 
@@ -81,7 +142,12 @@ func validRestoreRequest() *ateletpb.RestoreRequest {
 		ActorId:                "counter-1",
 		TargetAteomUid:         "422938ba-8860-4983-a25d-d6bcb0a69d4e",
 		Spec:                   &ateletpb.WorkloadSpec{Containers: []*ateletpb.Container{{Name: "worker"}}},
-		SnapshotUriPrefix:      "gs://bucket/actors/1/snapshots/2/",
+		Type:                   ateletpb.CheckpointType_CHECKPOINT_TYPE_EXTERNAL,
+		Config: &ateletpb.RestoreRequest_ExternalConfig{
+			ExternalConfig: &ateletpb.ExternalCheckpointConfiguration{
+				SnapshotUriPrefix: "gs://bucket/actors/1/snapshots/2/",
+			},
+		},
 	}
 }
 
@@ -109,21 +175,32 @@ func TestValidateRunRequest(t *testing.T) {
 // Checkpoint and Restore must reject a bad snapshot URI prefix even when
 // every common field is valid.
 func TestValidateCheckpointRequest(t *testing.T) {
+	makeReq := func(opts ...func(*ateletpb.CheckpointRequest)) *ateletpb.CheckpointRequest {
+		r := validCheckpointRequest()
+		for _, opt := range opts {
+			opt(r)
+		}
+		return r
+	}
+
 	tests := []struct {
 		name    string
-		mutate  func(*ateletpb.CheckpointRequest)
+		req     *ateletpb.CheckpointRequest
 		wantErr bool
 	}{
-		{"valid", func(*ateletpb.CheckpointRequest) {}, false},
-		{"empty snapshot uri", func(r *ateletpb.CheckpointRequest) { r.SnapshotUriPrefix = "" }, true},
-		{"bucketless snapshot uri", func(r *ateletpb.CheckpointRequest) { r.SnapshotUriPrefix = "relative/path" }, true},
-		{"invalid ateom uid", func(r *ateletpb.CheckpointRequest) { r.TargetAteomUid = "../escape" }, true},
+		{"valid", makeReq(), false},
+		{"empty snapshot uri", makeReq(func(r *ateletpb.CheckpointRequest) { r.GetExternalConfig().SnapshotUriPrefix = "" }), true},
+		{"bucketless snapshot uri", makeReq(func(r *ateletpb.CheckpointRequest) { r.GetExternalConfig().SnapshotUriPrefix = "relative/path" }), true},
+		{"invalid ateom uid", makeReq(func(r *ateletpb.CheckpointRequest) { r.TargetAteomUid = "../escape" }), true},
+		{"invalid local snapshot prefix", makeReq(func(r *ateletpb.CheckpointRequest) {
+			r.Type = ateletpb.CheckpointType_CHECKPOINT_TYPE_LOCAL
+			r.Config = &ateletpb.CheckpointRequest_LocalConfig{LocalConfig: &ateletpb.LocalCheckpointConfiguration{SnapshotPrefix: ""}}
+		}), true},
+		{"unspecified snapshot type", makeReq(func(r *ateletpb.CheckpointRequest) { r.Type = ateletpb.CheckpointType_CHECKPOINT_TYPE_UNSPECIFIED }), true},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			req := validCheckpointRequest()
-			tc.mutate(req)
-			if err := validateCheckpointRequest(req); (err != nil) != tc.wantErr {
+			if err := validateCheckpointRequest(tc.req); (err != nil) != tc.wantErr {
 				t.Errorf("validateCheckpointRequest err = %v, wantErr %v", err, tc.wantErr)
 			}
 		})
@@ -131,36 +208,46 @@ func TestValidateCheckpointRequest(t *testing.T) {
 }
 
 func TestValidateRestoreRequest(t *testing.T) {
+	makeReq := func(opts ...func(*ateletpb.RestoreRequest)) *ateletpb.RestoreRequest {
+		r := validRestoreRequest()
+		for _, opt := range opts {
+			opt(r)
+		}
+		return r
+	}
+
 	tests := []struct {
 		name    string
-		mutate  func(*ateletpb.RestoreRequest)
+		req     *ateletpb.RestoreRequest
 		wantErr bool
 	}{
-		{"valid", func(*ateletpb.RestoreRequest) {}, false},
-		{"empty snapshot uri", func(r *ateletpb.RestoreRequest) { r.SnapshotUriPrefix = "" }, true},
-		{"bucketless snapshot uri", func(r *ateletpb.RestoreRequest) { r.SnapshotUriPrefix = "relative/path" }, true},
-		{"invalid ateom uid", func(r *ateletpb.RestoreRequest) { r.TargetAteomUid = "../escape" }, true},
+		{"valid", makeReq(), false},
+		{"empty snapshot uri", makeReq(func(r *ateletpb.RestoreRequest) { r.GetExternalConfig().SnapshotUriPrefix = "" }), true},
+		{"bucketless snapshot uri", makeReq(func(r *ateletpb.RestoreRequest) { r.GetExternalConfig().SnapshotUriPrefix = "relative/path" }), true},
+		{"invalid ateom uid", makeReq(func(r *ateletpb.RestoreRequest) { r.TargetAteomUid = "../escape" }), true},
+		{"invalid local snapshot prefix", makeReq(func(r *ateletpb.RestoreRequest) {
+			r.Type = ateletpb.CheckpointType_CHECKPOINT_TYPE_LOCAL
+			r.Config = &ateletpb.RestoreRequest_LocalConfig{LocalConfig: &ateletpb.LocalCheckpointConfiguration{SnapshotPrefix: ""}}
+		}), true},
+		{"unspecified snapshot type", makeReq(func(r *ateletpb.RestoreRequest) { r.Type = ateletpb.CheckpointType_CHECKPOINT_TYPE_UNSPECIFIED }), true},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			req := validRestoreRequest()
-			tc.mutate(req)
-			if err := validateRestoreRequest(req); (err != nil) != tc.wantErr {
+			if err := validateRestoreRequest(tc.req); (err != nil) != tc.wantErr {
 				t.Errorf("validateRestoreRequest err = %v, wantErr %v", err, tc.wantErr)
 			}
 		})
 	}
 }
 
-// TestFetchRunscRejectsBadHash confirms fetchRunsc validates the runsc hash
+// TestFetchAssetRejectsBadHash confirms fetchAsset validates the asset hash
 // before the cache-hit os.Stat/early-return, not merely "at some point". To
 // prove the ordering, it plants a real file at the exact path an invalid hash
-// resolves to: a correctly-ordered fetchRunsc validates first and returns an
+// resolves to: a correctly-ordered fetchAsset validates first and returns an
 // error, while a regression that stats first would find this file and return it
 // with a nil error, failing the test. StaticFilesDir is redirected to a temp
-// dir so the planted path is writable and isolated. Both arch fields are set so
-// the test is independent of the host GOARCH.
-func TestFetchRunscRejectsBadHash(t *testing.T) {
+// dir so the planted path is writable and isolated.
+func TestFetchAssetRejectsBadHash(t *testing.T) {
 	orig := ateompath.StaticFilesDir
 	ateompath.StaticFilesDir = t.TempDir()
 	t.Cleanup(func() { ateompath.StaticFilesDir = orig })
@@ -173,12 +260,76 @@ func TestFetchRunscRejectsBadHash(t *testing.T) {
 	}
 
 	s := &AteomHerder{}
-	bad := &ateletpb.RunscPlatformConfig{Sha256Hash: badHash}
-	cfg := &ateletpb.RunscConfig{Amd64: bad, Arm64: bad}
-
-	if _, err := s.fetchRunsc(context.Background(), cfg); err == nil {
-		t.Error("fetchRunsc returned a cache hit for an invalid hash; validation must run before the os.Stat early return")
+	if _, err := s.fetchAsset(context.Background(), assetEntry{SHA256: badHash}); err == nil {
+		t.Error("fetchAsset returned a cache hit for an invalid hash; validation must run before the os.Stat early return")
 	}
+}
+
+// fakeObjectStorage serves fixed bytes for GetObject so fetchAsset can be tested.
+type fakeObjectStorage struct {
+	data []byte
+	err  error
+}
+
+func (f fakeObjectStorage) GetObject(_ context.Context, _, _ string) (io.ReadCloser, error) {
+	if f.err != nil {
+		return nil, f.err
+	}
+	return io.NopCloser(bytes.NewReader(f.data)), nil
+}
+
+func (fakeObjectStorage) PutObject(_ context.Context, _, _ string, _ io.Reader) error { return nil }
+
+// TestFetchAssetStreaming covers the streamed download: good asset cached,
+// over-cap rejected, hash mismatch rejected (failures leave no cache file).
+func TestFetchAssetStreaming(t *testing.T) {
+	origDir, origCap := ateompath.StaticFilesDir, maxAssetBytes
+	t.Cleanup(func() { ateompath.StaticFilesDir, maxAssetBytes = origDir, origCap })
+
+	content := []byte("micro-vm kernel bytes")
+	goodHash := fmt.Sprintf("%x", sha256.Sum256(content))
+	const url = "gs://test-bucket/asset"
+
+	t.Run("good asset is cached", func(t *testing.T) {
+		ateompath.StaticFilesDir = t.TempDir()
+		s := &AteomHerder{anonGCSClient: fakeObjectStorage{data: content}}
+		path, err := s.fetchAsset(context.Background(), assetEntry{URL: url, SHA256: goodHash})
+		if err != nil {
+			t.Fatalf("fetchAsset: %v", err)
+		}
+		got, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatalf("reading cached asset: %v", err)
+		}
+		if !bytes.Equal(got, content) {
+			t.Errorf("cached bytes = %q, want %q", got, content)
+		}
+	})
+
+	t.Run("over-cap asset rejected, cache not written", func(t *testing.T) {
+		ateompath.StaticFilesDir = t.TempDir()
+		maxAssetBytes = 4 // content is longer than this
+		s := &AteomHerder{anonGCSClient: fakeObjectStorage{data: content}}
+		if _, err := s.fetchAsset(context.Background(), assetEntry{URL: url, SHA256: goodHash}); err == nil {
+			t.Fatal("fetchAsset accepted an over-cap asset")
+		}
+		if _, err := os.Stat(ateompath.RunSCBinaryPath(goodHash)); !errors.Is(err, os.ErrNotExist) {
+			t.Errorf("over-cap download left a file at the cache path (stat err = %v)", err)
+		}
+	})
+
+	t.Run("hash mismatch rejected, cache not written", func(t *testing.T) {
+		ateompath.StaticFilesDir = t.TempDir()
+		maxAssetBytes = origCap
+		wrongHash := strings.Repeat("a", 64) // valid 64-hex format, wrong value
+		s := &AteomHerder{anonGCSClient: fakeObjectStorage{data: content}}
+		if _, err := s.fetchAsset(context.Background(), assetEntry{URL: url, SHA256: wrongHash}); err == nil {
+			t.Fatal("fetchAsset accepted a hash mismatch")
+		}
+		if _, err := os.Stat(ateompath.RunSCBinaryPath(wrongHash)); !errors.Is(err, os.ErrNotExist) {
+			t.Errorf("mismatched download left a file at the cache path (stat err = %v)", err)
+		}
+	})
 }
 
 // TestRPCBoundariesReject confirms each of the three RPCs validates path inputs

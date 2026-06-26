@@ -53,6 +53,7 @@ demo-counter_deploy() {
 
 demo-counter_delete() {
   log_step "demo-counter_delete"
-  sed "s|\${ATE_DEMO_SNAPSHOT_ROOT}|${ATE_DEMO_SNAPSHOT_ROOT}|g" demos/counter/counter.yaml.tmpl \
+  delete_demo_actors ate-demo-counter counter
+  sed "s|\${BUCKET_NAME}|${BUCKET_NAME}|g" demos/counter/counter.yaml.tmpl \
     | run_kubectl delete --ignore-not-found -f -
 }

@@ -38,6 +38,7 @@ demo-sandbox_deploy() {
 
 demo-sandbox_delete() {
   log_step "demo-sandbox_delete"
-  sed "s|\${ATE_DEMO_SNAPSHOT_ROOT}|${ATE_DEMO_SNAPSHOT_ROOT}|g" demos/sandbox/sandbox.yaml.tmpl \
+  delete_demo_actors ate-demo-sandbox sandbox-template
+  sed "s|\${BUCKET_NAME}|${BUCKET_NAME}|g" demos/sandbox/sandbox.yaml.tmpl \
     | run_kubectl delete --ignore-not-found -f -
 }

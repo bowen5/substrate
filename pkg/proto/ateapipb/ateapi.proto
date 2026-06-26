@@ -29,8 +29,14 @@ service Control {
   // Create a new Actor deriving from a given ActorTemplate.
   rpc CreateActor(CreateActorRequest) returns (CreateActorResponse) {}
 
+  // Update mutable fields on an existing Actor.
+  rpc UpdateActor(UpdateActorRequest) returns (UpdateActorResponse) {}
+
   // Suspend a given actor to a new snapshot.
   rpc SuspendActor(SuspendActorRequest) returns (SuspendActorResponse) {}
+
+  // Pause a given actor and keep its snapshots on node VM.
+  rpc PauseActor(PauseActorRequest) returns (PauseActorResponse) {}
 
   // Resume an actor from its latest snapshot.
   rpc ResumeActor(ResumeActorRequest) returns (ResumeActorResponse) {}
@@ -48,6 +54,36 @@ service Control {
   rpc DebugClear(DebugClearRequest) returns (DebugClearResponse) {}
 }
 
+enum SnapshotType {
+  SNAPSHOT_TYPE_UNSPECIFIED = 0;
+  SNAPSHOT_TYPE_LOCAL       = 1;
+  SNAPSHOT_TYPE_EXTERNAL      = 2;
+}
+
+message ExternalSnapshotInfo {
+  string snapshot_uri_prefix = 1;
+}
+
+message LocalSnapshotInfo {
+  string snapshot_prefix = 1;
+  // Node VMs that have local snapshots for this actor, while it's PAUSED.
+  repeated string node_vms_with_local_snapshots = 2;
+}
+
+message SnapshotInfo {
+  SnapshotType type = 1;
+  oneof data {
+    ExternalSnapshotInfo external = 2;
+    LocalSnapshotInfo    local    = 3;
+  }
+}
+
+// Selector matches worker pools by label.
+// Only equality-based matching is supported.
+message Selector {
+  map<string, string> match_labels = 1;
+}
+
 message Actor {
   string actor_id = 1;
   int64  version  = 2;
@@ -61,6 +97,8 @@ message Actor {
     STATUS_RUNNING     = 2;
     STATUS_SUSPENDING  = 3;
     STATUS_SUSPENDED   = 4;
+    STATUS_PAUSING     = 5;
+    STATUS_PAUSED      = 6;
   }
   Status status = 5;
 
@@ -68,9 +106,25 @@ message Actor {
   string ateom_pod_name      = 7;
   string ateom_pod_ip        = 8;
 
-  string last_snapshot        = 9;
+  // last_snapshot
+  reserved 9;
   string in_progress_snapshot = 10;
   string ateom_pod_uid        = 11;
+  SnapshotInfo latest_snapshot_info = 12;
+
+  // worker_selector is the per-actor placement constraint. The scheduler
+  // evaluates the AND of this selector and the template's workerSelector to
+  // find eligible pools. Set at CreateActor; may be updated at any time via
+  // UpdateActor. Changes take effect on the next ResumeActor call.
+  Selector worker_selector = 13;
+
+  // worker_pool_name is the name of the WorkerPool that owns the currently
+  // assigned worker, in the same namespace as ateom_pod_namespace (pool and
+  // pod namespaces always match). Set by the scheduler at assignment time
+  // and cleared when the worker is freed. Needed to release the worker on
+  // suspend/pause since eligibility is no longer a single fixed pool
+  // reference on the ActorTemplate.
+  string worker_pool_name = 14;
 }
 
 message GetActorRequest {
@@ -91,9 +145,28 @@ message CreateActorRequest {
 
   // The name of the ActorTemplate to derive from.
   string actor_template_name = 3;
+
+  // worker_selector sets the actor's placement constraint at creation time.
+  // If empty, the actor matches any pool admitted by the template's selector.
+  Selector worker_selector = 4;
 }
 
 message CreateActorResponse {
+  Actor actor = 1;
+}
+
+// Request to update mutable fields on an existing Actor.
+// May be called regardless of the actor's current status.
+// Changes take effect on the next ResumeActor call.
+message UpdateActorRequest {
+  string actor_id = 1;
+
+  // worker_selector replaces the actor's current placement constraint.
+  // Takes effect on the next ResumeActor call.
+  Selector worker_selector = 2;
+}
+
+message UpdateActorResponse {
   Actor actor = 1;
 }
 
@@ -102,6 +175,14 @@ message SuspendActorRequest {
 }
 
 message SuspendActorResponse {
+  Actor actor = 1;
+}
+
+message PauseActorRequest {
+  string actor_id = 1;
+}
+
+message PauseActorResponse {
   Actor actor = 1;
 }
 
@@ -162,6 +243,7 @@ message Worker {
   string ip              = 7;
   int64  version         = 8;
   string worker_pod_uid  = 9;
+  string node_name       = 10;
 }
 
 message DebugClearRequest {}
