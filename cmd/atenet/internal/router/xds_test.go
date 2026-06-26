@@ -24,6 +24,8 @@ import (
 	clusterv3 "github.com/envoyproxy/go-control-plane/envoy/config/cluster/v3"
 	listenerv3 "github.com/envoyproxy/go-control-plane/envoy/config/listener/v3"
 	routev3 "github.com/envoyproxy/go-control-plane/envoy/config/route/v3"
+	extprocv3filter "github.com/envoyproxy/go-control-plane/envoy/extensions/filters/http/ext_proc/v3"
+	hcmv3 "github.com/envoyproxy/go-control-plane/envoy/extensions/filters/network/http_connection_manager/v3"
 	cachev3 "github.com/envoyproxy/go-control-plane/pkg/cache/v3"
 	resourcev3 "github.com/envoyproxy/go-control-plane/pkg/resource/v3"
 )
@@ -135,6 +137,38 @@ func TestXdsServer_UpdateSnapshot(t *testing.T) {
 		if sa.GetAddress() != "0.0.0.0" {
 			t.Errorf("Expected address '0.0.0.0', got %s", sa.GetAddress())
 		}
+	}
+}
+
+func TestXdsServer_ExtProcTimeouts(t *testing.T) {
+	server := NewXdsServer(18000)
+	hcmAny := server.buildHcm("test")
+
+	hcm := &hcmv3.HttpConnectionManager{}
+	if err := hcmAny.UnmarshalTo(hcm); err != nil {
+		t.Fatalf("unmarshal HTTP connection manager: %v", err)
+	}
+
+	var extProc *extprocv3filter.ExternalProcessor
+	for _, filter := range hcm.GetHttpFilters() {
+		if filter.GetName() != "envoy.filters.http.ext_proc" {
+			continue
+		}
+		extProc = &extprocv3filter.ExternalProcessor{}
+		if err := filter.GetTypedConfig().UnmarshalTo(extProc); err != nil {
+			t.Fatalf("unmarshal ext_proc filter: %v", err)
+		}
+		break
+	}
+	if extProc == nil {
+		t.Fatal("ext_proc filter not found")
+	}
+
+	if got, want := extProc.GetGrpcService().GetTimeout().AsDuration(), 10*time.Second; got != want {
+		t.Errorf("ext_proc gRPC timeout = %v, want %v", got, want)
+	}
+	if got, want := extProc.GetMessageTimeout().AsDuration(), 10*time.Second; got != want {
+		t.Errorf("ext_proc message timeout = %v, want %v", got, want)
 	}
 }
 

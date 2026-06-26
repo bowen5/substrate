@@ -304,13 +304,14 @@ func (x *XdsServer) buildHcm(statPrefix string) *anypb.Any {
 					ClusterName: ClusterName,
 				},
 			},
-			Timeout: durationpb.New(5 * time.Second),
+			Timeout: durationpb.New(10 * time.Second),
 		},
 		MutationRules: &mutationrulesv3.HeaderMutationRules{
 			AllowAllRouting: &wrapperspb.BoolValue{Value: true},
 		},
-		// Explicitly configure the message timeout to avoid the 200ms default
-		MessageTimeout: durationpb.New(5 * time.Second),
+		// Explicitly configure the message timeout to avoid the 200ms default and
+		// allow the first request to wait for actor resume.
+		MessageTimeout: durationpb.New(10 * time.Second),
 		ProcessingMode: &extprocv3filter.ProcessingMode{
 			RequestHeaderMode:   extprocv3filter.ProcessingMode_SEND,
 			ResponseHeaderMode:  extprocv3filter.ProcessingMode_SKIP,
