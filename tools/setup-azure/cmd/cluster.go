@@ -87,6 +87,10 @@ func createClusterInternal(ctx context.Context, client *armcontainerservice.Mana
 		Identity: &armcontainerservice.ManagedClusterIdentity{
 			Type: to.Ptr(armcontainerservice.ResourceIdentityTypeSystemAssigned),
 		},
+		SKU: &armcontainerservice.ManagedClusterSKU{
+			Name: to.Ptr(armcontainerservice.ManagedClusterSKUNameBase),
+			Tier: to.Ptr(armcontainerservice.ManagedClusterSKUTierStandard),
+		},
 		Properties: &armcontainerservice.ManagedClusterProperties{
 			DNSPrefix:         to.Ptr(env.DNSPrefix),
 			EnableRBAC:        to.Ptr(true),

@@ -81,17 +81,20 @@ func createStorageAccountIdempotent(ctx context.Context, client *armstorage.Acco
 func createStorageAccountInternal(ctx context.Context, client *armstorage.AccountsClient, env *SnapshotStorageEnvironment) error {
 	slog.Info("Storage account does not exist. Creating...", slog.String("resourceGroup", env.ResourceGroup), slog.String("account", env.AccountName), slog.String("location", env.Location))
 
+	accountKind := storageAccountKind(env.SKUName)
+	accessTier := storageAccountAccessTier(env.SKUName)
+
 	createCtx, cancel := context.WithTimeout(ctx, 20*time.Minute)
 	defer cancel()
 
 	poller, err := client.BeginCreate(createCtx, env.ResourceGroup, env.AccountName, armstorage.AccountCreateParameters{
 		Location: to.Ptr(env.Location),
-		Kind:     to.Ptr(armstorage.KindStorageV2),
+		Kind:     to.Ptr(accountKind),
 		SKU: &armstorage.SKU{
 			Name: to.Ptr(armstorage.SKUName(env.SKUName)),
 		},
 		Properties: &armstorage.AccountPropertiesCreateParameters{
-			AccessTier:             to.Ptr(armstorage.AccessTierHot),
+			AccessTier:             to.Ptr(accessTier),
 			AllowBlobPublicAccess:  to.Ptr(false),
 			EnableHTTPSTrafficOnly: to.Ptr(true),
 			MinimumTLSVersion:      to.Ptr(armstorage.MinimumTLSVersionTLS12),
@@ -117,8 +120,9 @@ func validateExistingStorageAccount(account armstorage.Account, env *SnapshotSto
 	if account.Location != nil && !strings.EqualFold(*account.Location, env.Location) {
 		return fmt.Errorf("storage account %s is in location %s, but expected %s", env.AccountName, *account.Location, env.Location)
 	}
-	if account.Kind != nil && *account.Kind != armstorage.KindStorageV2 {
-		return fmt.Errorf("storage account %s has kind %s, but expected %s", env.AccountName, *account.Kind, armstorage.KindStorageV2)
+	expectedKind := storageAccountKind(env.SKUName)
+	if account.Kind != nil && *account.Kind != expectedKind {
+		return fmt.Errorf("storage account %s has kind %s, but expected %s", env.AccountName, *account.Kind, expectedKind)
 	}
 	if account.SKU != nil && account.SKU.Name != nil && !strings.EqualFold(string(*account.SKU.Name), env.SKUName) {
 		slog.Warn("Storage account SKU differs from requested SKU; leaving existing account unchanged", slog.String("account", env.AccountName), slog.String("current", string(*account.SKU.Name)), slog.String("requested", env.SKUName))
@@ -151,4 +155,22 @@ func createBlobContainerIdempotent(ctx context.Context, client *armstorage.BlobC
 
 	slog.Info("Blob container already exists", slog.String("account", env.AccountName), slog.String("container", env.ContainerName))
 	return nil
+}
+
+func storageAccountKind(skuName string) armstorage.Kind {
+	if isPremiumBlobSKU(skuName) {
+		return armstorage.KindBlockBlobStorage
+	}
+	return armstorage.KindStorageV2
+}
+
+func storageAccountAccessTier(skuName string) armstorage.AccessTier {
+	if isPremiumBlobSKU(skuName) {
+		return armstorage.AccessTierPremium
+	}
+	return armstorage.AccessTierHot
+}
+
+func isPremiumBlobSKU(skuName string) bool {
+	return strings.EqualFold(skuName, string(armstorage.SKUNamePremiumLRS)) || strings.EqualFold(skuName, string(armstorage.SKUNamePremiumZRS))
 }
