@@ -8,14 +8,14 @@ It deploys a simple Go HTTP server (`counter.go`) that increments a counter on e
 
 - A k8s cluster with Agent Substrate installed (`./hack/install-ate.sh --deploy-ate-system`).
 - `ko` installed for building images.
-- A snapshot storage root for demos (configured via `ATE_DEMO_SNAPSHOT_ROOT`, for example `gs://${BUCKET_NAME}`).
+- A snapshot storage root for demos (configured via `ATE_STORAGE_ROOT`, for example `gs://${BUCKET_NAME}`).
 
 ## How to Run on Agent Substrate
 
 ### 1. Build and Deploy
 
 > [!NOTE]
-> Do not manually edit `demos/counter/counter.yaml.tmpl`. The installation script automatically derives the counter snapshot location from `${ATE_DEMO_SNAPSHOT_ROOT}` during deployment.
+> Do not manually edit `demos/counter/counter.yaml.tmpl`. The installation script automatically derives the counter snapshot location from `${ATE_STORAGE_ROOT}` during deployment.
 
 Use the core installation script to build the image and apply the resolved manifests to your cluster:
 

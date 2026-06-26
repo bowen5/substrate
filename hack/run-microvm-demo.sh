@@ -28,16 +28,20 @@
 # pointed at by KO_CONFIG_PATH — the committed .ko.yaml is never touched.
 #
 # Env (most come from .ate-dev-env.sh):
-#   KO_DOCKER_REPO   (required) image registry, e.g. gcr.io/PROJECT/ate-images for
-#                    GKE or localhost:5001 for kind.
-#   BUCKET_NAME      object store bucket for assets/snapshots (default: ate-snapshots).
+#   KO_DOCKER_REPO   (required) image registry, e.g. gcr.io/PROJECT/ate-images,
+#                    <acr>.azurecr.io/ate-images, or localhost:5001 for kind.
+#   ATE_STORAGE_ROOT object store root for assets/snapshots, e.g. gs://ate-snapshots
+#                    or azblob://ate-snapshots. Required.
 #   KUBECTL_CONTEXT  (optional) kube context; threaded into install + ko apply + kubectl.
 #   PROJECT_ID       (optional) GCP project for the GCS asset upload (GKE path).
 #   ARCH             target arch (default: from KO_DEFAULTPLATFORMS, else host arch).
 #   ATEOM_BASE_TAG   tag for the built ateom-base image (default: e2fsprogs).
 #   OUT              asset dir (default: $PWD/bin/microvm-assets/$ARCH, gitignored).
-#   ATE_INSTALL_KIND "true" for the kind path (stage assets to rustfs + install-ate-kind.sh);
-#                    default false uploads assets to GCS + uses install-ate.sh.
+#   ATE_INSTALL_KIND "true" for the kind path (stage assets to rustfs + install-ate-kind.sh).
+#   ATE_INSTALL_AKS  "true" for the AKS path (stage assets to Azure Blob + install-ate.sh).
+#   AZURE_STORAGE_ACCOUNT_NAME required for Azure asset staging.
+#   AZURE_STORAGE_CONTAINER_NAME Azure Blob container; used for AKS staging/default root.
+#                    Default non-kind/non-AKS uploads assets to GCS + uses install-ate.sh.
 
 set -o errexit -o nounset -o pipefail
 
@@ -53,9 +57,30 @@ fi
 # --- env / defaults ---------------------------------------------------------
 KO_DOCKER_REPO="${KO_DOCKER_REPO:-}"
 KUBECTL_CONTEXT="${KUBECTL_CONTEXT:-}"
-BUCKET_NAME="${BUCKET_NAME:-ate-snapshots}"
 ATEOM_BASE_TAG="${ATEOM_BASE_TAG:-e2fsprogs}"
 ATE_INSTALL_KIND="${ATE_INSTALL_KIND:-false}"
+ATE_INSTALL_AKS="${ATE_INSTALL_AKS:-false}"
+
+if [[ "${ATE_INSTALL_KIND}" == "true" && "${ATE_INSTALL_AKS}" == "true" ]]; then
+  echo "Error: ATE_INSTALL_KIND and ATE_INSTALL_AKS cannot both be true" >&2
+  exit 1
+fi
+
+ATE_STORAGE_ROOT="${ATE_STORAGE_ROOT:-}"
+if [[ -z "${ATE_STORAGE_ROOT}" ]]; then
+  echo "Error: ATE_STORAGE_ROOT is required (for example gs://ate-snapshots or azblob://ate-snapshots)" >&2
+  exit 1
+fi
+ATE_STORAGE_ROOT="${ATE_STORAGE_ROOT%/}"
+
+storage_scheme="${ATE_STORAGE_ROOT%%://*}"
+storage_container="${ATE_STORAGE_ROOT#*://}"
+storage_container="${storage_container%%/*}"
+
+if [[ -z "${storage_scheme}" || -z "${storage_container}" || "${storage_container}" == "${ATE_STORAGE_ROOT}" ]]; then
+  echo "Error: ATE_STORAGE_ROOT must look like gs://bucket or azblob://container" >&2
+  exit 1
+fi
 
 # Target arch: match the images' platform (KO_DEFAULTPLATFORMS is set by
 # .ate-dev-env.sh on GKE and by the kind wrapper); fall back to the host arch.
@@ -136,13 +161,27 @@ else
 fi
 
 # Upload the four assets under kata-assets/, where atelet fetches them: the
-# in-cluster rustfs (port-forwarded, S3 API) on kind, or the GCS bucket on GKE.
+# in-cluster rustfs (port-forwarded, S3 API) on kind, Azure Blob on AKS, or the
+# GCS bucket on GKE.
 if [[ "${ATE_INSTALL_KIND}" == "true" ]]; then
-  log "Staging assets to in-cluster rustfs bucket ${BUCKET_NAME} (kata-assets/)..."
-  OUT="${OUT}" BUCKET="${BUCKET_NAME}" KUBECTL_CONTEXT="${KUBECTL_CONTEXT}" hack/microvm-assets/stage-to-rustfs.sh
+  log "Staging assets to in-cluster rustfs bucket ${storage_container} (kata-assets/)..."
+  OUT="${OUT}" BUCKET="${storage_container}" KUBECTL_CONTEXT="${KUBECTL_CONTEXT}" hack/microvm-assets/stage-to-rustfs.sh
+elif [[ "${ATE_INSTALL_AKS}" == "true" ]]; then
+  if [[ "${storage_scheme}" != "azblob" ]]; then
+    echo "Error: ATE_INSTALL_AKS=true requires ATE_STORAGE_ROOT=azblob://<container>" >&2
+    exit 1
+  fi
+  log "Staging assets to Azure Blob ${ATE_STORAGE_ROOT}/kata-assets/ ..."
+  OUT="${OUT}" \
+    AZURE_STORAGE_CONTAINER_NAME="${storage_container}" \
+    hack/microvm-assets/stage-to-azure.sh
 else
-  log "Uploading assets to gs://${BUCKET_NAME}/kata-assets/ ..."
-  OUT="${OUT}" BUCKET="${BUCKET_NAME}" hack/microvm-assets/stage-to-gcs.sh
+  if [[ "${storage_scheme}" != "gs" ]]; then
+    echo "Error: non-kind/non-AKS path requires ATE_STORAGE_ROOT=gs://<bucket>" >&2
+    exit 1
+  fi
+  log "Uploading assets to ${ATE_STORAGE_ROOT}/kata-assets/ ..."
+  OUT="${OUT}" BUCKET="${storage_container}" hack/microvm-assets/stage-to-gcs.sh
 fi
 
 # --- 5. deploy the control plane --------------------------------------------
@@ -151,7 +190,7 @@ if [[ "${ATE_INSTALL_KIND}" == "true" ]]; then
   # install-ate-kind.sh sets NO_DEV_ENV/KO_DOCKER_REPO/ARCH/ATE_INSTALL_KIND itself.
   KUBECTL_CONTEXT="${KUBECTL_CONTEXT}" hack/install-ate-kind.sh --deploy-ate-system
 else
-  # GKE path: pass KO_DOCKER_REPO/BUCKET_NAME/KUBECTL_CONTEXT through the env.
+  # GKE/AKS path: pass KO_DOCKER_REPO/KUBECTL_CONTEXT and storage env through the env.
   KUBECTL_CONTEXT="${KUBECTL_CONTEXT}" hack/install-ate.sh --deploy-ate-system
 fi
 
@@ -160,7 +199,7 @@ fi
 # ko apply/create/delete/run accept args after `--`; thread --context there
 # (mirrors the run_ko helper in hack/install-ate.sh).
 log "Applying the counter-microvm demo manifest..."
-sed "s|\${BUCKET_NAME}|${BUCKET_NAME}|g" demos/counter/counter-microvm.yaml.tmpl \
+sed "s|\${ATE_STORAGE_ROOT}|${ATE_STORAGE_ROOT}|g" demos/counter/counter-microvm.yaml.tmpl \
   | ./hack/run-tool.sh ko apply -f - ${KUBECTL_CONTEXT:+-- --context="${KUBECTL_CONTEXT}"}
 
 # --- 7. next steps ----------------------------------------------------------

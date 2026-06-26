@@ -37,7 +37,7 @@ demo-counter_deploy() {
     ko_tags="${ko_tags},${TAG}"
   fi
 
-  sed "s|\${ATE_DEMO_SNAPSHOT_ROOT}|${ATE_DEMO_SNAPSHOT_ROOT}|g" demos/counter/counter.yaml.tmpl \
+  sed "s|\${ATE_STORAGE_ROOT}|${ATE_STORAGE_ROOT}|g" demos/counter/counter.yaml.tmpl \
     | run_ko apply --tags "${ko_tags}" -f -
 
   # Wait for the demo to be fully ready before returning. On a cold cluster the
@@ -54,6 +54,6 @@ demo-counter_deploy() {
 demo-counter_delete() {
   log_step "demo-counter_delete"
   delete_demo_actors ate-demo-counter counter
-  sed "s|\${BUCKET_NAME}|${BUCKET_NAME}|g" demos/counter/counter.yaml.tmpl \
+  sed "s|\${ATE_STORAGE_ROOT}|${ATE_STORAGE_ROOT}|g" demos/counter/counter.yaml.tmpl \
     | run_kubectl delete --ignore-not-found -f -
 }

@@ -14,7 +14,7 @@ This demo showcases a "Zero-Idle" agentic lifecycle using a specialized Go serve
 ### 1. Prerequisites
 *   A GKE cluster with **Agent Substrate** installed.
 *   `ko` installed (for building and deploying Go images).
-*   `ATE_DEMO_SNAPSHOT_ROOT` configured for snapshot storage (for example `gs://${BUCKET_NAME}`).
+*   `ATE_STORAGE_ROOT` configured for snapshot storage (for example `gs://${BUCKET_NAME}`).
 *   `kubectl-ate` CLI built in the root directory.
 
 ### 2. Deploy the Infrastructure

@@ -16,7 +16,7 @@ It allows you to run arbitrary commands in an sandboxed, isolated container (run
 
 - A k8s cluster with Agent Substrate installed.
 - `ko` installed for building images.
-- A snapshot storage root for demos (configured via `ATE_DEMO_SNAPSHOT_ROOT`, for example `gs://${BUCKET_NAME}`).
+- A snapshot storage root for demos (configured via `ATE_STORAGE_ROOT`, for example `gs://${BUCKET_NAME}`).
 - `kubectl-ate` CLI installed (can be installed via `go install ./cmd/kubectl-ate`).
 
 ## How to Run on Agent Substrate
@@ -24,7 +24,7 @@ It allows you to run arbitrary commands in an sandboxed, isolated container (run
 ### 1. Build and Deploy
 
 > [!NOTE]
-> Do not manually edit `demos/sandbox/sandbox.yaml.tmpl`. The installation script automatically injects `${ATE_DEMO_SNAPSHOT_ROOT}` during deployment.
+> Do not manually edit `demos/sandbox/sandbox.yaml.tmpl`. The installation script automatically injects `${ATE_STORAGE_ROOT}` during deployment.
 
 Use the core installation script to build the image and apply the resolved manifests to your cluster:
 

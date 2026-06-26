@@ -18,8 +18,8 @@
 #
 # The sandbox binaries (cloud-hypervisor, guest kernel, guest rootfs, base
 # configuration.toml) live on a cluster-scoped SandboxConfig, FETCHED at runtime
-# from the cluster object store bucket ${BUCKET_NAME} under kata-assets/ (rustfs on
-# kind, GCS on GKE) — NOT baked into the worker image. ateom owns the
+# from the cluster object store under kata-assets/ (rustfs on kind, GCS on GKE,
+# Azure Blob on AKS) — NOT baked into the worker image. ateom owns the
 # cloud-hypervisor boot itself and gives the actor a writable virtio-blk rootfs, so
 # neither the kata shim nor virtiofsd is needed. The per-arch sha256 values below
 # are the asset sets produced by hack/microvm-assets/assemble.sh; atelet selects
@@ -42,29 +42,29 @@ spec:
   assets:
     arm64:
       cloud-hypervisor:
-        url: "gs://${BUCKET_NAME}/kata-assets/cloud-hypervisor"
+        url: "${ATE_STORAGE_ROOT}/kata-assets/cloud-hypervisor"
         sha256: "bf004ddc1a148f47caa87ac49a783b8dbd6bf9bc27abe522ed197df7b982d3b1"
       kata-kernel:
-        url: "gs://${BUCKET_NAME}/kata-assets/vmlinux"
+        url: "${ATE_STORAGE_ROOT}/kata-assets/vmlinux"
         sha256: "a44d663f4ddad20a35527a3578fadef9beb23c1e5cb720e85d6928d6de70d3a1"
       kata-image:
-        url: "gs://${BUCKET_NAME}/kata-assets/rootfs.img"
+        url: "${ATE_STORAGE_ROOT}/kata-assets/rootfs.img"
         sha256: "7ebd652760c881374c0a761d34addcb76d9a650e35c10c01b780ebcdd9a1f2aa"
       kata-config:
-        url: "gs://${BUCKET_NAME}/kata-assets/configuration-clh.toml"
+        url: "${ATE_STORAGE_ROOT}/kata-assets/configuration-clh.toml"
         sha256: "df504d9be0ed01765fdc8a9467955e1e671eb97724443f65a524bf914ccb818b"
     amd64:
       cloud-hypervisor:
-        url: "gs://${BUCKET_NAME}/kata-assets/cloud-hypervisor"
+        url: "${ATE_STORAGE_ROOT}/kata-assets/cloud-hypervisor"
         sha256: "829af01ff075bb96c4f183905134c453a88d68cbabdc6b87df21098842581ee9"
       kata-kernel:
-        url: "gs://${BUCKET_NAME}/kata-assets/vmlinux"
+        url: "${ATE_STORAGE_ROOT}/kata-assets/vmlinux"
         sha256: "a5f0af5fe536cd52c3ca214d15d81c577e5c5dc672947ab7980b91ddcb7c9d71"
       kata-image:
-        url: "gs://${BUCKET_NAME}/kata-assets/rootfs.img"
+        url: "${ATE_STORAGE_ROOT}/kata-assets/rootfs.img"
         sha256: "ca9e06621b7edd2e056607c04db8bcebd92ad37ad4e37d18b8247d851feb0fae"
       kata-config:
-        url: "gs://${BUCKET_NAME}/kata-assets/configuration-clh.toml"
+        url: "${ATE_STORAGE_ROOT}/kata-assets/configuration-clh.toml"
         sha256: "8cce580e5abf78c05c8e9b929c24a524b9a81fc47be4e2e4f38dcae5ef052be6"
 
 ---
@@ -103,4 +103,4 @@ spec:
     matchLabels:
       workload: counter-microvm
   snapshotsConfig:
-    location: gs://${BUCKET_NAME}/ate-demo-counter-microvm/
+    location: ${ATE_STORAGE_ROOT}/ate-demo-counter-microvm/

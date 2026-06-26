@@ -30,7 +30,7 @@ This guide assumes you know Kubernetes and the general shape of agent runtimes (
   kubectl port-forward svc/ateapi 8080:8080 -n ate-system
   ```
 - An **Anthropic API key** (the agents call Claude).
-- A snapshot storage root for demos configured via `ATE_DEMO_SNAPSHOT_ROOT` (for example `gs://${BUCKET_NAME}`).
+- A snapshot storage root for demos configured via `ATE_STORAGE_ROOT` (for example `gs://${BUCKET_NAME}`).
 - `KO_DOCKER_REPO` set to a registry you can push to (e.g. `gcr.io/${PROJECT_ID}/ate-images`, same as `hack/ate-dev-env.sh.example`). The deploy step builds and pushes the workload image there with a sha256-pinned reference.
 - `docker buildx` (the deploy function builds the workload image — a Dockerfile-based Python + Claude Code wrapper, not a Go binary, so `ko` doesn't apply for the workload itself).
 
@@ -51,11 +51,11 @@ From the repo root, with your Anthropic key and demo snapshot root in the enviro
 
 ```bash
 ANTHROPIC_API_KEY=sk-ant-... \
-ATE_DEMO_SNAPSHOT_ROOT=gs://your-substrate-bucket \
+ATE_STORAGE_ROOT=gs://your-substrate-bucket \
   ./hack/install-ate.sh --deploy-demo-claude-code-multiplex
 ```
 
-This creates the `claude-multiplex-demo` namespace, an `anthropic-api-key` Secret, a 2-pod `WorkerPool`, and three `ActorTemplate` objects named `agent-luna`, `agent-mars`, `agent-orion`. Under the hood, the deploy function builds the workload image with `docker buildx`, pushes it to `${KO_DOCKER_REPO}/claude-multiplex-demo-workload`, resolves the pushed sha256 digest, and substitutes the digest-pinned reference plus `ANTHROPIC_API_KEY` and `ATE_DEMO_SNAPSHOT_ROOT` into the manifest template at apply time. The ActorTemplates consume the key through `valueFrom.secretKeyRef`.
+This creates the `claude-multiplex-demo` namespace, an `anthropic-api-key` Secret, a 2-pod `WorkerPool`, and three `ActorTemplate` objects named `agent-luna`, `agent-mars`, `agent-orion`. Under the hood, the deploy function builds the workload image with `docker buildx`, pushes it to `${KO_DOCKER_REPO}/claude-multiplex-demo-workload`, resolves the pushed sha256 digest, and substitutes the digest-pinned reference plus `ANTHROPIC_API_KEY` and `ATE_STORAGE_ROOT` into the manifest template at apply time. The ActorTemplates consume the key through `valueFrom.secretKeyRef`.
 
 ### 2. Start the dashboard
 

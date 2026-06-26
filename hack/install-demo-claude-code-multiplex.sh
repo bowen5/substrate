@@ -58,8 +58,8 @@ demo-claude-code-multiplex_deploy() {
     echo "ANTHROPIC_API_KEY must be set" >&2
     return 1
   fi
-  if [[ -z "${ATE_DEMO_SNAPSHOT_ROOT:-}" ]]; then
-    echo "ATE_DEMO_SNAPSHOT_ROOT must be set" >&2
+  if [[ -z "${ATE_STORAGE_ROOT:-}" ]]; then
+    echo "ATE_STORAGE_ROOT must be set" >&2
     return 1
   fi
   if [[ -z "${KO_DOCKER_REPO:-}" ]]; then
@@ -74,7 +74,7 @@ demo-claude-code-multiplex_deploy() {
   fi
   log_step "  workload image: ${workload_image}"
 
-  sed -e "s|\${ATE_DEMO_SNAPSHOT_ROOT}|${ATE_DEMO_SNAPSHOT_ROOT}|g" \
+  sed -e "s|\${ATE_STORAGE_ROOT}|${ATE_STORAGE_ROOT}|g" \
       -e "s|\${ANTHROPIC_API_KEY}|${ANTHROPIC_API_KEY}|g" \
       -e "s|\${WORKLOAD_IMAGE}|${workload_image}|g" \
       demos/claude-code-multiplex/claude-code-multiplex.yaml.tmpl \
@@ -88,17 +88,16 @@ demo-claude-code-multiplex_delete() {
     claude-multiplex-demo agent-mars \
     claude-multiplex-demo agent-orion
   # Delete-time substitution doesn't need a real image — k8s identifies
-  # resources by metadata, not container spec. Use placeholders so sed
-  # produces valid YAML even when the env vars aren't set.
-  sed -e "s|\${ATE_DEMO_SNAPSHOT_ROOT}|${ATE_DEMO_SNAPSHOT_ROOT:-placeholder}|g" \
-      -e "s|\${ANTHROPIC_API_KEY}|${ANTHROPIC_API_KEY:-placeholder}|g" \
-      -e "s|\${WORKLOAD_IMAGE}|placeholder|g" \
+  # resources by metadata, not container spec.
+  sed -e "s|\${ATE_STORAGE_ROOT}|${ATE_STORAGE_ROOT}|g" \
+      -e "s|\${ANTHROPIC_API_KEY}|${ANTHROPIC_API_KEY}|g" \
+      -e "s|\${WORKLOAD_IMAGE}|${WORKLOAD_IMAGE}|g" \
       demos/claude-code-multiplex/claude-code-multiplex.yaml.tmpl \
     | run_kubectl delete --ignore-not-found -f -
 }
 
 demo-claude-code-multiplex_usage() {
   echo ""
-  echo "  Required env: ANTHROPIC_API_KEY, ATE_DEMO_SNAPSHOT_ROOT, KO_DOCKER_REPO"
+  echo "  Required env: ANTHROPIC_API_KEY, ATE_STORAGE_ROOT, KO_DOCKER_REPO"
   echo "  See demos/claude-code-multiplex/README.md for the walkthrough."
 }

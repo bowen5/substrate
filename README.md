@@ -246,11 +246,11 @@ Similarly, you can deploy or cleanup specific Agent Substrate components using t
 
 8. Deploy a demo with an Azure Blob snapshot root:
    ```bash
-   export ATE_DEMO_SNAPSHOT_ROOT=azblob://${AZURE_STORAGE_CONTAINER_NAME}
+   export ATE_STORAGE_ROOT=azblob://${AZURE_STORAGE_CONTAINER_NAME}
    ./hack/install-ate.sh --deploy-demo-counter
    ```
 
-   Demo templates append their own stable folder under `ATE_DEMO_SNAPSHOT_ROOT`; for example, `--deploy-demo-counter` uses `ate-demo-counter/`.
+   Demo templates append their own stable folder under `ATE_STORAGE_ROOT`; for example, `--deploy-demo-counter` uses `ate-demo-counter/`.
 
 > Note: the Azure provisioning path currently does not create monitoring dashboards. Azure-managed Redis/Azure Cache integration is also intentionally out of scope for this development path; the AKS runtime uses in-cluster Valkey for now.
 
