@@ -103,6 +103,7 @@ func createClusterInternal(ctx context.Context, client *armcontainerservice.Mana
 					Type:                to.Ptr(armcontainerservice.AgentPoolTypeVirtualMachineScaleSets),
 					Mode:                to.Ptr(armcontainerservice.AgentPoolModeSystem),
 					OSType:              to.Ptr(armcontainerservice.OSTypeLinux),
+					OSSKU:               to.Ptr(armcontainerservice.OSSKUAzureLinux3),
 					OrchestratorVersion: optionalStringPtr(env.KubernetesVersion),
 					VnetSubnetID:        optionalStringPtr(env.VnetSubnetID),
 				},
@@ -160,6 +161,10 @@ func validateExistingCluster(cluster armcontainerservice.ManagedCluster, env *Cl
 		return fmt.Errorf("AKS cluster %s exists but workload identity is not enabled; refusing to mutate existing cluster automatically", env.ClusterName)
 	}
 
+	if !existingClusterPoolHasOSSKU(props.AgentPoolProfiles, env.NodePoolName, armcontainerservice.OSSKUAzureLinux3) {
+		return fmt.Errorf("AKS cluster %s exists but agent pool %s is not using OS SKU %s; refusing destructive reconciliation", env.ClusterName, env.NodePoolName, armcontainerservice.OSSKUAzureLinux3)
+	}
+
 	if env.VnetSubnetID != "" {
 		if !existingClusterHasSubnet(props.AgentPoolProfiles, env.VnetSubnetID) {
 			return fmt.Errorf("AKS cluster %s exists but no agent pool uses AKS_VNET_SUBNET_ID %s; refusing destructive reconciliation", env.ClusterName, env.VnetSubnetID)
@@ -178,6 +183,16 @@ func existingClusterHasSubnet(pools []*armcontainerservice.ManagedClusterAgentPo
 		if strings.EqualFold(*pool.VnetSubnetID, subnetID) {
 			return true
 		}
+	}
+	return false
+}
+
+func existingClusterPoolHasOSSKU(pools []*armcontainerservice.ManagedClusterAgentPoolProfile, poolName string, osSKU armcontainerservice.OSSKU) bool {
+	for _, pool := range pools {
+		if pool == nil || pool.Name == nil || !strings.EqualFold(*pool.Name, poolName) {
+			continue
+		}
+		return pool.OSSKU != nil && strings.EqualFold(string(*pool.OSSKU), string(osSKU))
 	}
 	return false
 }

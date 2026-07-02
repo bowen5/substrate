@@ -22,7 +22,7 @@
 #   OUT                          asset dir, default ./bin/microvm-assets/amd64
 #   AZURE_STORAGE_ACCOUNT_NAME   required
 #   AZURE_STORAGE_CONTAINER_NAME required container name
-#   AZURE_STORAGE_AUTH_MODE      az CLI auth mode, default login
+#   AZURE_STORAGE_AUTH_MODE      az CLI auth mode, default key
 #   AZURE_BLOB_PREFIX            object prefix, default kata-assets
 
 set -o errexit -o nounset -o pipefail
@@ -32,7 +32,7 @@ ROOT="$(git rev-parse --show-toplevel)"
 OUT="${OUT:-${ROOT}/bin/microvm-assets/amd64}"
 ACCOUNT="${AZURE_STORAGE_ACCOUNT_NAME:-}"
 CONTAINER="${AZURE_STORAGE_CONTAINER_NAME:-}"
-AUTH_MODE="${AZURE_STORAGE_AUTH_MODE:-login}"
+AUTH_MODE="${AZURE_STORAGE_AUTH_MODE:-key}"
 PREFIX="${AZURE_BLOB_PREFIX:-kata-assets}"
 
 if [[ -z "${ACCOUNT}" ]]; then
